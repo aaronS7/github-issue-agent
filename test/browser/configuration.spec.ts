@@ -12,6 +12,12 @@ test.describe.serial('configuration console', () => {
     await page.getByLabel('Access token', { exact: true }).check();
     await page.getByLabel('GitHub token', { exact: true }).fill('browser-test-github-secret');
     await page.getByLabel('Webhook secret', { exact: true }).fill('browser-test-webhook-secret');
+    await page.getByText('Cloudflare relay · optional', { exact: true }).click();
+    await page.getByLabel('Relay URL', { exact: true }).fill('https://relay.example');
+    await page.getByLabel('Cloudflare account ID', { exact: true }).fill('a'.repeat(32));
+    await page.getByLabel('Cloudflare queue ID', { exact: true }).fill('b'.repeat(32));
+    await page.getByLabel('Cloudflare API token', { exact: true }).fill('browser-fixture-cloudflare-api-token');
+    await page.getByLabel('Relay access token', { exact: true }).fill('browser-fixture-relay-token-with-thirty-two-characters');
     await page.getByRole('link', { name: 'Triggers', exact: true }).first().click();
     await page.getByLabel('Required labels').fill('agent, ready');
     await page.getByRole('link', { name: 'Model & runtime', exact: true }).click();
@@ -29,6 +35,10 @@ test.describe.serial('configuration console', () => {
     await expect(page.getByLabel('GitHub token', { exact: true })).toHaveValue('');
     await expect(page.getByLabel('GitHub token', { exact: true })).toHaveAttribute('placeholder', 'Saved — leave blank to keep');
     await expect(page.getByLabel('Webhook secret', { exact: true })).toHaveValue('');
+    await page.getByText('Cloudflare relay · optional', { exact: true }).click();
+    await expect(page.getByLabel('Relay URL', { exact: true })).toHaveValue('https://relay.example');
+    await expect(page.getByLabel('Cloudflare API token', { exact: true })).toHaveValue('');
+    await expect(page.getByLabel('Relay access token', { exact: true })).toHaveAttribute('placeholder', 'Saved — leave blank to keep');
     await page.getByRole('button', { name: 'Test connection' }).click();
     await expect(page.getByRole('status')).toContainText('GitHub repository read access verified');
     await page.getByRole('button', { name: 'Environment', exact: true }).click();
@@ -37,6 +47,10 @@ test.describe.serial('configuration console', () => {
     await expect(dialog).toContainText('GITHUB_TOKEN=<redacted>');
     await expect(dialog).not.toContainText('browser-test-github-secret');
     await expect(dialog).not.toContainText('browser-test-webhook-secret');
+    await expect(dialog).toContainText('CLOUDFLARE_API_TOKEN=<redacted>');
+    await expect(dialog).toContainText('CLOUDFLARE_RELAY_TOKEN=<redacted>');
+    await expect(dialog).not.toContainText('browser-fixture-cloudflare-api-token');
+    await expect(dialog).not.toContainText('browser-fixture-relay-token');
     await page.keyboard.press('Escape');
     await expect(dialog).not.toBeVisible();
     await expect(page.getByRole('button', { name: 'Environment', exact: true })).toBeFocused();
@@ -87,11 +101,33 @@ test.describe.serial('configuration console', () => {
     await page.goto('/');
     for (const section of ['GitHub', 'Triggers', 'Model & runtime', 'Tools']) {
       await page.getByRole('link', { name: section, exact: true }).first().click();
+      if (section === 'GitHub') await page.getByText('Cloudflare relay · optional', { exact: true }).click();
       await expect(page.getByRole('button', { name: 'Save changes' })).toBeVisible();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     }
     await page.getByRole('link', { name: 'Setup guide', exact: true }).first().click();
     await expect(page.getByRole('heading', { name: 'A small setup. A capable agent.' })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  });
+
+  test('saves API polling without a webhook secret and shows the polling setup guide', async ({ page }) => {
+    await page.goto('/');
+    await page.getByLabel('Access token', { exact: true }).check();
+    await page.getByLabel('GitHub token', { exact: true }).fill('browser-polling-fixture');
+    await page.getByRole('button', { name: 'Remove saved Webhook secret', exact: true }).click();
+    await page.getByLabel('Event source', { exact: true }).selectOption('poll');
+    await expect(page.getByLabel('Webhook secret', { exact: true })).toHaveCount(0);
+    await page.getByLabel('GitHub poll interval', { exact: true }).fill('90000');
+    await page.getByRole('button', { name: 'Check configuration' }).click();
+    await expect(page.getByRole('status')).toContainText('Configuration looks valid');
+    await page.getByRole('button', { name: 'Save changes' }).click();
+    await expect(page.getByRole('status')).toContainText('Configuration saved');
+    await page.reload();
+    await expect(page.getByLabel('Event source', { exact: true })).toHaveValue('poll');
+    await expect(page.getByLabel('GitHub poll interval', { exact: true })).toHaveValue('90000');
+    await page.getByRole('link', { name: 'Triggers', exact: true }).first().click();
+    await expect(page.getByRole('heading', { name: 'Issue discovery', exact: true })).toBeVisible();
+    await page.getByRole('link', { name: 'Setup guide', exact: true }).first().click();
+    await expect(page.getByRole('heading', { name: '02 / Poll the GitHub API', exact: true })).toBeVisible();
   });
 });

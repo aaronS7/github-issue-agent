@@ -23,6 +23,12 @@ id_ecdsa
 id_dsa
 secrets/
 credentials/
+.dev.vars
+.dev.vars.*
+.wrangler/
+wrangler.local.json
+wrangler.local.jsonc
+wrangler.local.toml
 
 # Persistent queues, workspaces, recordings, and local output.
 data/

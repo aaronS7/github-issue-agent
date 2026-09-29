@@ -95,3 +95,44 @@ test('concurrent saves use the revision, and legacy Anthropic key has its own pr
   assert.equal(parseEnv(raw).ANTHROPIC_API_KEY, 'legacy-secret');
   assert.equal(parseEnv(raw).GITHUB_TOKEN, undefined);
 });
+
+test('polling configuration requires API credentials without a webhook or complete relay settings', () => {
+  const env = { GITHUB_EVENT_SOURCE: 'poll', GITHUB_REPOSITORY: 'owner/repo',
+    GITHUB_FEEDBACK: 'false', GITHUB_TOKEN: 'fixture', EXTENSIONS: './extension.mjs',
+    CLOUDFLARE_RELAY_URL: 'https://relay.example', GITHUB_POLL_INTERVAL_MS: '60000' };
+  assert.deepEqual(validateFields(env, true), {});
+  assert.match(validateFields({ ...env, GITHUB_TOKEN: '' }, true).GITHUB_TOKEN!, /Polling requires/);
+  assert.ok(validateFields({ ...env, GITHUB_POLL_INTERVAL_MS: '9999' }, true).GITHUB_POLL_INTERVAL_MS);
+  assert.ok(validateFields({ ...env, GITHUB_EVENT_SOURCE: 'other' }, true).GITHUB_EVENT_SOURCE);
+});
+
+test('Cloudflare relay settings preserve masked secrets and check readiness without contacting Cloudflare', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'issue-cloudflare-config-'));
+  const path = join(directory, '.env');
+  const store = new ConfigStore(path);
+  const initial = await store.snapshot('csrf');
+  const partial = await store.save({ revision: initial.revision,
+    values: { CLOUDFLARE_RELAY_URL: 'https://relay.example' },
+    secrets: { CLOUDFLARE_API_TOKEN: 'fixture-cloudflare-api-token',
+      CLOUDFLARE_RELAY_TOKEN: 'fixture-private-relay-token-with-thirty-two-characters' },
+  }, 'csrf');
+  assert.equal(partial.secrets.CLOUDFLARE_API_TOKEN, true);
+  assert.equal(partial.secrets.CLOUDFLARE_RELAY_TOKEN, true);
+  assert.equal(JSON.stringify(partial).includes('fixture-cloudflare-api-token'), false);
+  assert.equal(JSON.stringify(partial).includes('fixture-private-relay-token'), false);
+  const incomplete = await store.draftEnv({ values: {}, secrets: {} });
+  assert.match(validateFields(incomplete, true).CLOUDFLARE_ACCOUNT_ID!, /CLOUDFLARE_ACCOUNT_ID/);
+  const ready = { ...incomplete, GITHUB_REPOSITORY: 'owner/repo', GITHUB_WEBHOOK_SECRET: 'fixture-secret',
+    GITHUB_FEEDBACK: 'false', EXTENSIONS: './examples/extensions.mjs',
+    CLOUDFLARE_ACCOUNT_ID: 'a'.repeat(32), CLOUDFLARE_QUEUE_ID: 'b'.repeat(32) };
+  assert.deepEqual(validateFields(ready, true), {});
+  assert.ok(validateFields({ ...ready, CLOUDFLARE_RELAY_URL: 'https://user:password@relay.example' }, true).CLOUDFLARE_RELAY_URL);
+  assert.ok(validateFields({ ...ready, CLOUDFLARE_QUEUE_ID: '../queue' }, true).CLOUDFLARE_QUEUE_ID);
+  const removed = await store.save({ revision: partial.revision,
+    values: { CLOUDFLARE_RELAY_URL: '', CLOUDFLARE_QUEUE_ID: '' },
+    secrets: { CLOUDFLARE_RELAY_TOKEN: null },
+  }, 'csrf');
+  assert.equal(removed.secrets.CLOUDFLARE_RELAY_TOKEN, false);
+  assert.equal(parseEnv(await readFile(path, 'utf8')).CLOUDFLARE_API_TOKEN, 'fixture-cloudflare-api-token');
+  assert.equal(validateFields(await store.draftEnv({ values: {}, secrets: {} }), true).CLOUDFLARE_RELAY_URL, undefined);
+});

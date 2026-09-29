@@ -14,6 +14,8 @@ export interface Config {
   database: string;
   repositories: Record<string, RepositoryConfig>;
   webhookSecret: string;
+  eventSource?: 'webhook' | 'poll';
+  pollIntervalMs?: number;
   host: string;
   port: number;
   concurrency: number;
@@ -41,7 +43,9 @@ const csv = (value: string | undefined) => value?.split(',').map((s) => s.trim()
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const repository = env.GITHUB_REPOSITORY;
   if (!isRepositoryName(repository)) throw new Error('Set GITHUB_REPOSITORY=owner/repo');
-  if (!env.GITHUB_WEBHOOK_SECRET) throw new Error('Set GITHUB_WEBHOOK_SECRET');
+  const eventSource = env.GITHUB_EVENT_SOURCE ?? 'webhook';
+  if (eventSource !== 'webhook' && eventSource !== 'poll') throw new Error('Invalid GITHUB_EVENT_SOURCE');
+  if (eventSource === 'webhook' && !env.GITHUB_WEBHOOK_SECRET) throw new Error('Set GITHUB_WEBHOOK_SECRET');
   const dataDir = resolve(env.DATA_DIR ?? 'data');
   const feedback = env.GITHUB_FEEDBACK !== 'false';
   const clientId = env.GITHUB_APP_CLIENT_ID?.trim();
@@ -60,13 +64,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (feedback && !githubApp && !env.GITHUB_TOKEN) {
     throw new Error('Set GitHub App credentials, GITHUB_TOKEN, or GITHUB_FEEDBACK=false');
   }
+  if (eventSource === 'poll' && !githubApp && !env.GITHUB_TOKEN) {
+    throw new Error('GitHub polling requires GitHub App credentials or GITHUB_TOKEN');
+  }
   const labels = csv(env.ISSUE_LABELS), authors = csv(env.ISSUE_AUTHORS), botLogins = csv(env.BOT_LOGINS);
   return {
     dataDir, database: resolve(dataDir, 'queue.sqlite'),
     repositories: { [repository.toLowerCase()]: {
       ...(env.REPOSITORY_PATH ? { path: resolve(env.REPOSITORY_PATH) } : {}), baseRef: env.BASE_REF ?? 'HEAD',
     } },
-    webhookSecret: env.GITHUB_WEBHOOK_SECRET,
+    webhookSecret: env.GITHUB_WEBHOOK_SECRET ?? '', eventSource,
+    pollIntervalMs: integer(env, 'GITHUB_POLL_INTERVAL_MS', 60_000, 10_000, 3_600_000),
     host: env.HOST ?? '127.0.0.1', port: integer(env, 'PORT', 3000, 0, 65535),
     concurrency: integer(env, 'CONCURRENCY', 2, 1, 64),
     leaseMs: integer(env, 'LEASE_MS', 60_000, 3000), maxAttempts: integer(env, 'MAX_ATTEMPTS', 3, 1, 100),
@@ -75,7 +83,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     githubApiUrl: env.GITHUB_API_URL ?? 'https://api.github.com',
     githubServerUrl: env.GITHUB_SERVER_URL ?? 'https://github.com',
     filters: {
-      ...(labels ? { labels } : {}), ...(authors ? { authors } : {}), ...(botLogins ? { botLogins } : {}),
+      ...(labels?.length ? { labels } : {}), ...(authors?.length ? { authors } : {}), ...(botLogins?.length ? { botLogins } : {}),
       commentPrefix: env.COMMENT_PREFIX ?? '/agent',
       issueActions: csv(env.ISSUE_ACTIONS) ?? ['opened', 'reopened', 'labeled'],
     },

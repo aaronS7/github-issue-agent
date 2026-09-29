@@ -1,11 +1,12 @@
 # Issue agent design
 
-GitHub signs each webhook. The HTTP handler verifies the raw request, normalizes supported issue/comment events, applies repository and trigger filters, and commits a deduplicated job before acknowledging it. Newly opened issues require no label or author filter by default. Comments prefixed with `/agent` create follow-up runs; bot comments and the agent's own marked comments are ignored.
+In webhook mode, GitHub signs each request. The HTTP handler verifies the raw body, normalizes supported issue/comment events, applies repository and trigger filters, and commits a deduplicated job before acknowledging it. In poll mode, a scheduled REST client reads issue and comment snapshots and feeds the same durable queue; it does not start the webhook listener. Newly opened issues require no label or author filter by default. Comments prefixed with `/agent` create follow-up runs; bot comments and the agent's own marked comments are ignored.
 
 ```mermaid
 flowchart LR
   GH[GitHub webhook] --> Verify[Verify signature and filters]
   Verify --> Q[(SQLite jobs and outbox)]
+  Poll[Optional GitHub REST poller] --> Q
   Q --> Worker[Leased worker pool]
   Worker --> Workspace[Isolated checkout]
   Workspace --> Agent[Model with one bash tool]
@@ -20,7 +21,7 @@ flowchart LR
 
 SQLite runs on a local persistent disk with WAL, `synchronous=FULL`, a busy timeout and explicit transactions. Delivery IDs are unique. Claims are atomic and use expiring leases with unguessable tokens; completion, renewal and tool side effects require the current token. Expired attempts are retried with backoff and bounded attempts. Different issues may run concurrently; one issue is serialized. Every attempt gets a different workspace so a stale worker cannot corrupt its successor's files.
 
-Job state and outgoing comments/reactions use a transactional outbox. Hook delivery failures do not rerun successful code changes. Delivery remains at least once: GitHub and SQLite cannot share an atomic transaction. Comment markers and reaction uniqueness reduce duplicates. The SQLite backup command produces a consistent snapshot; copying only the database while WAL is active is unsafe. Durability depends on the filesystem/device honoring sync operations. Tests can verify process crashes and reopen behavior, not simulate every storage device losing power.
+Job state and outgoing comments/reactions use a transactional outbox. The poller's first-activation cutoff, scan cursors, and ETags are saved as SQLite ingestion state with the queue and delivery deduplication. Hook delivery failures do not rerun successful code changes. Delivery remains at least once: GitHub and SQLite cannot share an atomic transaction. Comment markers and reaction uniqueness reduce duplicates. The SQLite backup command produces a consistent snapshot; copying only the database while WAL is active is unsafe. Durability depends on the filesystem/device honoring sync operations. Tests can verify process crashes and reopen behavior, not simulate every storage device losing power.
 
 ## Agent and extension points
 
@@ -30,11 +31,11 @@ The host clones the configured GitHub repository into a managed source cache, th
 
 ## GitHub authentication
 
-When `GITHUB_APP_CLIENT_ID` and `GITHUB_APP_PRIVATE_KEY_PATH` are both configured, the host reads and validates the RSA key at startup and keeps it in the process. It takes precedence over static `GITHUB_TOKEN`; configuring only one App setting is an error. The shared in-memory provider requests a repository-scoped installation token on first use, then refreshes on demand within 60 seconds of expiry. Concurrent calls share a refresh. REST calls and each Git clone/fetch obtain a usable credential; a REST 401 or explicit Git authentication rejection triggers one refresh and retry. Clone/fetch 404s, permission denials, and network failures do not trigger an authentication retry; normal worker retries apply. No token is persisted and no timer runs while idle. Installation tokens expire after an hour, but the service mints replacements as needed without scheduled restarts. `GITHUB_FEEDBACK=false` omits the Issues write permission from the requested token scope.
+When `GITHUB_APP_CLIENT_ID` and `GITHUB_APP_PRIVATE_KEY_PATH` are both configured, the host reads and validates the RSA key at startup and keeps it in the process. It takes precedence over static `GITHUB_TOKEN`; configuring only one App setting is an error. The shared in-memory provider requests a repository-scoped installation token on first use, then refreshes on demand within 60 seconds of expiry. Concurrent calls share a refresh. REST calls and each Git clone/fetch obtain a usable credential; a REST 401 or explicit Git authentication rejection triggers one refresh and retry. Clone/fetch 404s, permission denials, and network failures do not trigger an authentication retry; normal worker retries apply. No token is persisted and no timer runs while idle. Installation tokens expire after an hour, but the service mints replacements as needed without scheduled restarts. `GITHUB_FEEDBACK=false` omits Issues write; poll mode still requests Issues read.
 
 ## Recovery boundaries
 
-An acknowledged webhook has been stored durably. GitHub does not automatically redeliver webhook failures; deliveries missed while the service is unavailable need GitHub redelivery or the replay command. Repeated delivery of an accepted ID is harmless. Queue inspection and retry commands expose failures. The service requires Node 24, Git, a configured GitHub repository (or an optional local clone), GitHub credentials for outgoing actions, and model credentials for live runs; the offline demo uses a deterministic model. GitHub credentials can use automatic App authentication or a static `GITHUB_TOKEN`. Bot-authored issues qualify; bot replies and marked agent output are ignored on comment triggers.
+An acknowledged webhook has been stored durably. GitHub does not automatically redeliver webhook failures; deliveries missed while the service is unavailable need GitHub redelivery or the replay command. Poll mode has no webhook listener and requires a GitHub App or token with Issues read access. Its cutoff begins at first activation rather than backfilling; open issues updated afterward may qualify once. Snapshot polling cannot recover every intermediate event or promise GitHub's original event order. The service requires Node 24, Git, a configured GitHub repository (or an optional local clone), GitHub credentials, and model credentials for live runs; the offline demo uses a deterministic model. Bot-authored issues qualify; bot replies and marked agent output are ignored on comment triggers.
 
 ## Implementation and verification
 
@@ -46,5 +47,6 @@ The service, CLI, model adapters, extension example, systemd example, and CI wor
 - [just-bash security model](https://github.com/vercel-labs/just-bash/blob/main/THREAT_MODEL.md)
 - [GitHub webhook signature validation](https://docs.github.com/en/webhooks/using-webhooks/validating-webhook-deliveries)
 - [GitHub failed deliveries](https://docs.github.com/en/webhooks/using-webhooks/handling-failed-webhook-deliveries)
+- [GitHub REST API polling](https://docs.github.com/en/rest/using-the-rest-api/best-practices-for-using-the-rest-api) and [rate limits](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api)
 - [SQLite WAL](https://sqlite.org/wal.html)
 - [SQLite synchronous](https://sqlite.org/pragma.html#pragma_synchronous)

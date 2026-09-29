@@ -84,7 +84,7 @@ export class DurableQueue {
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const version = Number((this.db.prepare('PRAGMA user_version').get() as SqlRow).user_version);
-      if (version > 3) throw new Error(`Queue schema version ${version} is newer than this program`);
+      if (version > 4) throw new Error(`Queue schema version ${version} is newer than this program`);
       this.db.exec(`
       CREATE TABLE IF NOT EXISTS jobs (
         id INTEGER PRIMARY KEY,
@@ -128,6 +128,11 @@ export class DurableQueue {
         job_id INTEGER NOT NULL REFERENCES jobs(id),
         PRIMARY KEY(repository,issue_number)
       );
+      CREATE TABLE IF NOT EXISTS ingestion_state (
+        source TEXT PRIMARY KEY,
+        value_json TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
       `);
       const columns = this.db.prepare('PRAGMA table_info(outbox)').all() as SqlRow[];
       if (!columns.some(column => column.name === 'effect_key')) {
@@ -143,7 +148,7 @@ export class DurableQueue {
           SELECT repository,issue_number,MAX(id) FROM jobs WHERE status='done'
           GROUP BY repository,issue_number`);
       }
-      this.db.exec('PRAGMA user_version = 3');
+      this.db.exec('PRAGMA user_version = 4');
       this.db.exec('COMMIT');
     } catch (error) {
       this.db.exec('ROLLBACK');
@@ -153,6 +158,26 @@ export class DurableQueue {
   }
 
   close(): void { this.db.close(); }
+
+  hasDeliveryId(deliveryId: string): boolean {
+    return this.db.prepare('SELECT 1 FROM jobs WHERE delivery_id = ?').get(deliveryId) !== undefined;
+  }
+
+  /** Poll checkpoints share the queue's WAL/FULL durability and backup boundary. */
+  getIngestionState(source: string): unknown {
+    const row = this.db.prepare('SELECT value_json FROM ingestion_state WHERE source = ?').get(source) as SqlRow | undefined;
+    return row ? JSON.parse(String(row.value_json)) : undefined;
+  }
+
+  /** Advance only after the corresponding jobs have been durably enqueued. */
+  setIngestionState(source: string, value: unknown): void {
+    if (!source.trim()) throw new Error('An ingestion source is required');
+    const json = JSON.stringify(value);
+    if (json === undefined) throw new Error('Ingestion state must be JSON serializable');
+    this.transaction(() => this.db.prepare(`INSERT INTO ingestion_state(source,value_json,updated_at)
+      VALUES(?,?,?) ON CONFLICT(source) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at`)
+      .run(source, json, this.now()));
+  }
 
   /** Create a consistent SQLite backup without replacing an existing destination. */
   async backup(path: string): Promise<void> {

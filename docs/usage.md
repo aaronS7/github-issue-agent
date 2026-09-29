@@ -2,16 +2,18 @@
 
 ## Start work from an issue
 
-Open an issue in the configured repository describing the expected behavior, relevant files, and acceptance criteria. By default, `opened`, `reopened`, and `labeled` issue events start runs. No label or author filter is required, and bot-authored issues qualify.
+Open an issue in the configured repository describing the expected behavior, relevant files, and acceptance criteria. In the default webhook mode, `opened`, `reopened`, and `labeled` issue events start runs. No label or author filter is required, and bot-authored issues qualify.
 
-Adding a label can therefore start another run even after the initial open event. To trigger only newly opened issues, set `ISSUE_ACTIONS=opened`. To opt into work with a label, for example:
+With `GITHUB_EVENT_SOURCE=poll`, the service instead checks GitHub REST snapshots. On first activation it sets a cutoff and does not load older issues/comments as a backlog. Open issues updated after that cutoff may qualify once, including an older issue that gets a required label after the cutoff. Polling synthesizes `opened` for eligible issues, so `ISSUE_ACTIONS` has no effect in poll mode. See [Poll GitHub without webhooks](github-polling.md) for API limits and edge cases.
+
+In webhook mode, adding a label can start another run even after the initial open event. To trigger only newly opened issues, set `ISSUE_ACTIONS=opened`. To opt into work with a label, for example:
 
 ```dotenv
 ISSUE_ACTIONS=opened,reopened,labeled
 ISSUE_LABELS=agent
 ```
 
-An unlabeled opened issue is ignored; adding `agent` later starts a run. Existing labeled issues are not scanned or backfilled automatically. Event payloads are snapshots: removing a label after a job is accepted does not cancel that job.
+An unlabeled opened issue is ignored; adding `agent` later starts a run. Webhook event payloads are snapshots: removing a label after a job is accepted does not cancel that job. Polling does not backfill at activation, but an open issue updated later can qualify once when its snapshot contains the required labels.
 
 ## Continue through comments
 
@@ -23,7 +25,7 @@ Post a new comment starting with the configured prefix:
 
 The next run uses the issue and triggering comment, the previous completed run's summary, and its saved files. It does not fetch the entire comment history. Put the details needed for the next change in the triggering comment.
 
-Only comment creation triggers runs; editing an old comment does not. Bot comments, marked agent replies, and pull-request comments are excluded. Prefix matching is a case-sensitive literal start-of-string check. With `/agent`, leading whitespace prevents a match; an empty `COMMENT_PREFIX` accepts every otherwise eligible comment.
+In webhook mode, only comment creation triggers runs; editing an old comment does not. In poll mode, each matching comment ID is queued once. A comment created after activation can qualify if edited to start with `/agent` before the poller first queues it; edits to an already queued comment do not request another run, and comments created before the activation cutoff are ignored even if later edited. Bot comments, marked agent replies, and pull-request comments are excluded. Prefix matching is a case-sensitive literal start-of-string check. With `/agent`, leading whitespace prevents a match; an empty `COMMENT_PREFIX` accepts every otherwise eligible comment.
 
 Comments for the same issue queue behind earlier active/retrying jobs. Different issues can run concurrently. A failed attempt never becomes the starting point for a follow-up: the last accepted completed result does. Follow-ups preserve their existing issue branch; they do not automatically merge newer changes from the repository's base branch.
 
@@ -94,7 +96,9 @@ See [Run observability and terminal replay](observability.md) for configuration 
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `GITHUB_REPOSITORY` | Required | One `owner/repository` per CLI instance. |
-| `ISSUE_ACTIONS` | `opened,reopened,labeled` | Comma-separated issue actions. |
+| `GITHUB_EVENT_SOURCE` | `webhook` | `webhook` or `poll`. Polling needs Issues read access and no webhook listener/secret; see [the polling guide](github-polling.md). |
+| `GITHUB_POLL_INTERVAL_MS` | `60000` | Polling interval in milliseconds, 10000–3600000. |
+| `ISSUE_ACTIONS` | `opened,reopened,labeled` | Comma-separated webhook issue actions; ignored in poll mode. |
 | `ISSUE_LABELS` | Unset | Every listed label must be present. |
 | `ISSUE_AUTHORS` | Unset | Allowed issue authors; it is not a commenter allowlist. |
 | `COMMENT_PREFIX` | `/agent` | Literal prefix for a new comment. |

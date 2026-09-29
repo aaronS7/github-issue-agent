@@ -11,9 +11,11 @@ import { ensureGitHubSource } from './source.js';
 import { createWebhookServer } from './webhook.js';
 import { Worker, type Extensions } from './worker.js';
 import { readRun, readRuns } from './run-reader.js';
+import { CloudflareRelay, loadCloudflareRelayConfig } from './cloudflare-relay.js';
+import { GitHubPoller } from './github-poller.js';
 
 const usage = `Usage: node dist/cli.js COMMAND
-  serve                         Start the GitHub webhook receiver and workers
+  serve                         Start workers and the configured webhook or GitHub API source
   status                        Show recent jobs, feedback, and queue counts
   runs                          List jobs with attempt timing and recording availability
   inspect JOB_ID [RUN_ID]        Inspect an attempt and its first 200 timeline events
@@ -78,6 +80,8 @@ async function main() {
   }
   if (command !== 'serve' && command !== 'replay') throw new Error(usage);
   const config = loadConfig();
+  const polling = config.eventSource === 'poll';
+  const relayConfig = command === 'serve' && !polling ? loadCloudflareRelayConfig() : undefined;
   const queue = new DurableQueue(config.database, { leaseMs: config.leaseMs, maxAttempts: config.maxAttempts });
   try {
     if (command === 'replay') {
@@ -108,7 +112,7 @@ async function main() {
       catch { throw new Error('Unable to read GITHUB_APP_PRIVATE_KEY_PATH'); }
       githubAuth = new GitHubAppAuth({
         ...config.githubApp, privateKey, repository: Object.keys(config.repositories)[0]!,
-        apiUrl: config.githubApiUrl, feedback: config.feedback,
+        apiUrl: config.githubApiUrl, feedback: config.feedback, issuesRead: polling,
       });
     }
     const worker = new Worker({
@@ -120,19 +124,37 @@ async function main() {
       }, signal),
       log: (event) => console.log(JSON.stringify({ time: new Date().toISOString(), ...event })),
     });
-    const server = createWebhookServer({ queue, secret: config.webhookSecret,
-      repositories: new Set(Object.keys(config.repositories)), filters: config.filters });
-    await new Promise<void>((done, reject) => {
+    const repositories = new Set(Object.keys(config.repositories));
+    const relay = relayConfig ? new CloudflareRelay({ config: relayConfig, queue,
+      secret: config.webhookSecret, repositories, filters: config.filters,
+      log: event => console.log(JSON.stringify({ time: new Date().toISOString(),
+        event: `cloudflare_relay_${event.category}`, ...event })),
+    }) : undefined;
+    const poller = polling ? new GitHubPoller({ queue, auth: githubAuth!,
+      repository: Object.keys(config.repositories)[0]!, apiUrl: config.githubApiUrl,
+      filters: config.filters, intervalMs: config.pollIntervalMs ?? 60_000,
+      log: event => console.log(JSON.stringify({ time: new Date().toISOString(),
+        event: `github_poll_${event.category}`, ...event })),
+    }) : undefined;
+    const server = polling ? undefined : createWebhookServer({ queue, secret: config.webhookSecret,
+      repositories, filters: config.filters });
+    if (server) await new Promise<void>((done, reject) => {
       server.once('error', reject);
       server.listen(config.port, config.host, done);
     });
+    poller?.start();
+    relay?.start();
     worker.start();
-    console.log(JSON.stringify({ event: 'listening', address: server.address(), database: config.database }));
+    console.log(JSON.stringify({ event: polling ? 'polling' : 'listening',
+      ...(server ? { address: server.address() } : { intervalMs: config.pollIntervalMs ?? 60_000 }),
+      database: config.database }));
     await new Promise<void>((done) => {
       process.once('SIGINT', done);
       process.once('SIGTERM', done);
     });
-    const closed = new Promise<void>((done) => server.close(() => done()));
+    const closed = server ? new Promise<void>((done) => server.close(() => done())) : Promise.resolve();
+    await poller?.stop();
+    await relay?.stop();
     await worker.stop();
     await closed;
   } finally { queue.close(); }

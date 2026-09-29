@@ -1,13 +1,15 @@
 # Verification
 
-Verified locally on 2026-09-27 with Node v24.21.0 and Git 2.53.0.
+Verified locally on 2026-09-28 with Node v24.21.0 and Git 2.53.0.
 
 | Check | Result |
 | --- | --- |
 | `npm run check` | Passed backend and React TypeScript checks. |
 | `npm run build` | Passed; runnable JavaScript and declarations in `dist/`, React assets in `dist/ui/`. |
-| `npm test` | Passed all 104 tests. |
-| `npm run test:ui` | Passed all 8 Chromium browser tests against the built UI, local API, and recorded offline worker fixture. |
+| `npm test` | Passed all 134 tests. |
+| `npm run test:ui` | Passed all 9 Chromium browser tests against the built UI, local API, and recorded offline worker fixture. |
+| `npm run cloudflare:check` | Passed Worker TypeScript checks and all 10 Worker tests. Install the deployment package's dependencies first. |
+| `npm run cloudflare:dry-run` | Bundled successfully with the configured Queue and R2 bindings; no Cloudflare deployment. |
 | `npm run demo` | Passed complete offline signed-webhook flow. |
 | `npm run demo:recording` | Passed the same flow with local asciicast v2 recordings and readable attempt history. |
 | Built CLI smoke check | Startup, health endpoint, signed webhook, background worker, SIGTERM, status, and backup passed. |
@@ -29,6 +31,10 @@ Automatic App authentication is tested with signed JWT verification, repository 
 - Online backup reopens with the expected data and refuses to overwrite an existing destination.
 
 ## Integration coverage
+
+GitHub API polling tests cover persisted initial cutoffs, second-precision timestamps, updated older issues, label/author filters, comment prefix and bot handling, pagination failure recovery, SQLite reopen and deduplication, conditional requests, 401 token renewal, primary and secondary rate delays, long server-requested polling intervals, canonical repository casing, unsafe pagination/parent URL rejection, and cancellation. A subprocess CLI test completes a polled issue while the configured webhook port is occupied, with no webhook secret and incomplete Cloudflare settings. App token tests verify Issues read permission when polling with feedback disabled. Browser tests save polling settings, remove the webhook secret, and display the appropriate setup instructions.
+
+Cloudflare tests cover raw-byte HMAC verification, repository filtering, body limits, private payload retrieval, sanitized failures, persist-before-queue ordering, and fail-closed configuration. The Worker-to-consumer integration test preserves a payload larger than the Queue's message limit, commits its job to real SQLite before acknowledgement, simulates a lost acknowledgement, then reopens SQLite and deduplicates redelivery. A CLI test exercises relay startup and clean shutdown. An actual local Wrangler development runtime with emulated Queue/R2 returned 202 for a signed issue, 200 with the exact payload bytes for authenticated retrieval, 401 for an invalid signature, and 503 for missing configuration. Temporary local bindings and secrets were removed afterward.
 
 The offline demo processes one issue and one follow-up comment. It verifies duplicate issue delivery produces one job, actual just-bash edits fix the source, saved patches contain those edits, and the comment follow-up starts from the previous commit. Both jobs finish, and all seven feedback effects drain: three comments and four reactions. The source checkout remains intact for review.
 
@@ -54,6 +60,6 @@ The UI and configuration API were also verified through Tailscale Serve with cer
 
 ## Limits of this verification
 
-No live model generation, live GitHub repository mutation, hosted GitHub Actions run, or physical power-loss test was performed. Live operation needs a configured repository, webhook endpoint and secret, either complete App credentials or a static GitHub token, and model credentials. Queue durability relies on local storage honoring sync operations. GitHub comment delivery remains at least once; lookup-plus-post cannot provide an atomic exactly-once guarantee.
+No live model generation, live GitHub issue processing, real Cloudflare deployment, or physical power-loss test was performed. Live operation needs a configured repository, either complete App credentials or a static GitHub token, and model credentials. Webhook mode also needs a reachable ingress and matching secret; API polling needs no inbound endpoint. Queue durability relies on local storage honoring sync operations. GitHub comment delivery remains at least once; lookup-plus-post cannot provide an atomic exactly-once guarantee.
 
 Changes are retained as local commits, patches, and transcripts. This implementation does not automatically push branches, open pull requests, backfill existing issues, or poll reactions. App token refresh is automatic during use, but it has not been tested against live credentials.

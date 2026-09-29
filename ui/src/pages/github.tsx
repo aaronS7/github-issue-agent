@@ -3,11 +3,13 @@ import { ArrowUpRight, Check, CircleDot, Info, KeyRound, RefreshCw, ShieldCheck,
 import { GitHubIcon as Github } from '../components/icons';
 import type { Configuration } from '../lib/use-configuration';
 import { Button, Badge, CodeBlock, Notice, Section } from '../components/primitives';
-import { SecretField, SettingField } from '../components/fields';
+import { Field, SecretField, SettingField } from '../components/fields';
 import { hasSecret } from '../lib/configuration';
+import { CloudflareRelaySettings } from '../components/cloudflare-relay-settings';
 
 export function GitHubPage({ config }: { config: Configuration }) {
   const hasApp = Boolean(config.values.GITHUB_APP_CLIENT_ID || config.values.GITHUB_APP_PRIVATE_KEY_PATH || config.values.GITHUB_APP_INSTALLATION_ID);
+  const polling = config.values.GITHUB_EVENT_SOURCE === 'poll';
   const [modeOverride, setMode] = useState<'app' | 'token' | null>(null);
   useEffect(() => { if (!config.dirty) setMode(null); }, [config.dirty, config.snapshot?.revision]);
   const tokenChosen = hasSecret(config.snapshot!, config.secrets, 'GITHUB_TOKEN') || config.secrets.GITHUB_TOKEN === null;
@@ -15,6 +17,12 @@ export function GitHubPage({ config }: { config: Configuration }) {
   const [connection, setConnection] = useState<{ ok: boolean; message: string; fingerprint: string } | null>(null);
   const fingerprint = JSON.stringify([config.values, config.secrets]);
   const currentConnection = connection?.fingerprint === fingerprint ? connection : null;
+  let webhookUrl = 'https://your-domain.com/webhooks/github';
+  try {
+    const relay = new URL(config.values.CLOUDFLARE_RELAY_URL ?? '');
+    if (relay.protocol === 'https:' && !relay.username && !relay.password &&
+        relay.pathname === '/' && !relay.search && !relay.hash) webhookUrl = `${relay.origin}/webhooks/github`;
+  } catch { /* Use the direct webhook example while the relay origin is incomplete. */ }
   const changeMode = (next: 'app' | 'token') => {
     setMode(next);
     if (next === 'token') for (const key of ['GITHUB_APP_CLIENT_ID', 'GITHUB_APP_PRIVATE_KEY_PATH', 'GITHUB_APP_INSTALLATION_ID']) config.setValue(key, '');
@@ -43,16 +51,30 @@ export function GitHubPage({ config }: { config: Configuration }) {
         <SettingField config={config} name="GITHUB_APP_PRIVATE_KEY_PATH" placeholder="/absolute/path/to/github-app.pem" hint="Path to the PEM file on the machine running your bot." />
         <div className="inline-note"><RefreshCw size={14} /><span>Installation tokens renew automatically before expiry.</span></div>
         {hasSecret(config.snapshot!, config.secrets, 'GITHUB_TOKEN') && <p className="field-hint">Saved access token retained as a fallback. Complete App credentials take precedence.</p>}
-      </div> : <SecretField config={config} name="GITHUB_TOKEN" hint="Requires Contents: read and Issues: read & write when feedback is on. Static tokens must be renewed manually." />}
+      </div> : <SecretField config={config} name="GITHUB_TOKEN" hint="Requires Contents: read, Issues: read for polling, and Issues: write for feedback. Static tokens must be renewed manually." />}
       {currentConnection && <Notice tone={currentConnection.ok ? 'success' : 'error'} role="status">{currentConnection.ok ? <Check size={16} /> : <Info size={16} />}<span>{currentConnection.message}</span></Notice>}
     </Section>
-    <Section title="Webhook" description="Let GitHub tell your agent when an issue needs attention." action={<CircleDot size={18} className="muted" />}>
+    <Section title="Event source" description="Choose how your agent discovers work." action={<CircleDot size={18} className="muted" />}>
+      <Field id="GITHUB_EVENT_SOURCE" label="Event source" error={config.errors.GITHUB_EVENT_SOURCE}>
+        <select id="GITHUB_EVENT_SOURCE" className="input" value={config.values.GITHUB_EVENT_SOURCE || 'webhook'}
+          onChange={event => config.setValue('GITHUB_EVENT_SOURCE', event.target.value)}>
+          <option value="webhook">GitHub webhooks</option><option value="poll">Poll the GitHub API</option>
+        </select>
+      </Field>
+      {polling ? <div className="stack">
+        <SettingField config={config} name="GITHUB_POLL_INTERVAL_MS" type="number" min={10000} max={3600000} step={1000}
+          hint="Milliseconds between checks. 60000 is one minute. GitHub rate limits can delay the next check." />
+        <p className="field-hint">Uses outbound requests with your App or token. No public endpoint or webhook secret is needed. Disable webhook delivery in your GitHub App for a polling-only setup.</p>
+        <p className="field-hint">Starts with issues updated after first activation. Each eligible open issue runs once; new matching comments request follow-ups. Saved progress survives restarts.</p>
+      </div> : <>
       <SecretField config={config} name="GITHUB_WEBHOOK_SECRET" hint="Use the same secret in your GitHub App’s webhook settings. Copy a generated secret before saving; saved values stay hidden."
         action={<Button variant="ghost" onClick={generateSecret}><Sparkles size={12} />Generate secret</Button>} />
       {config.secrets.GITHUB_WEBHOOK_SECRET && <CodeBlock label="Copy the new secret into GitHub before saving" value={config.secrets.GITHUB_WEBHOOK_SECRET} />}
-      <CodeBlock label="Webhook endpoint · use your public HTTPS domain" value="https://your-domain.com/webhooks/github" />
+      <CodeBlock label="Webhook endpoint · use your public HTTPS domain" value={webhookUrl} />
       <div className="webhook-events"><span>Subscribe to</span><code>Issues</code><code>Issue comments</code></div>
       <a href="#setup" className="text-link">GitHub App setup guide<ArrowUpRight size={13} /></a>
+      <CloudflareRelaySettings config={config} />
+      </>}
     </Section>
     <details className="section advanced-section"><summary>GitHub Enterprise<span>Custom endpoints</span></summary><div className="section-body stack">
       <SettingField config={config} name="GITHUB_SERVER_URL" type="url" placeholder="https://github.com" />

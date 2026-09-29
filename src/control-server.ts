@@ -31,7 +31,8 @@ function send(res: ServerResponse, status: number, body: unknown): void {
 }
 
 function redactRunData(value: unknown, env: Record<string, string>): unknown {
-  const secrets = ['GITHUB_TOKEN', 'GITHUB_WEBHOOK_SECRET', 'MODEL_API_KEY', 'ANTHROPIC_API_KEY']
+  const secrets = ['GITHUB_TOKEN', 'GITHUB_WEBHOOK_SECRET', 'MODEL_API_KEY', 'ANTHROPIC_API_KEY',
+    'CLOUDFLARE_API_TOKEN', 'CLOUDFLARE_RELAY_TOKEN']
     .map(key => env[key]).filter((secret): secret is string => Boolean(secret)).sort((a, b) => b.length - a.length);
   const visit = (entry: unknown): unknown => {
     if (typeof entry === 'string') return secrets.reduce((text, secret) => text.split(secret).join('[REDACTED]'), entry);
@@ -109,6 +110,7 @@ async function checkGitHub(env: Record<string, string>, fetchImpl: typeof fetch)
       const auth = new GitHubAppAuth({
         clientId: env.GITHUB_APP_CLIENT_ID, privateKey, repository,
         apiUrl: apiUrl(env.GITHUB_API_URL), feedback: env.GITHUB_FEEDBACK !== 'false',
+        issuesRead: env.GITHUB_EVENT_SOURCE === 'poll',
         ...(env.GITHUB_APP_INSTALLATION_ID ? { installationId: Number(env.GITHUB_APP_INSTALLATION_ID) } : {}),
       }, { fetch: fetchImpl });
       token = await auth.getToken(AbortSignal.timeout(15_000));

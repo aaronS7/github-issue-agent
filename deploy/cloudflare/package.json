@@ -1,0 +1,20 @@
+{
+  "name": "github-issue-cloudflare-relay",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "check": "tsc --noEmit -p tsconfig.json",
+    "test": "tsx --test test/*.test.ts",
+    "deploy": "wrangler deploy",
+    "dry-run": "wrangler deploy --dry-run --outdir .wrangler-dry-run"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260929.1",
+    "@types/node": "26.6.3",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2",
+    "wrangler": "4.143.0"
+  }
+}

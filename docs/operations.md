@@ -31,9 +31,13 @@ sudo chmod 640 /etc/github-issue-agent.env
 
 Keep that group limited to the service account and trusted operators. With App authentication, the process reads the key at startup and mints installation tokens as GitHub requests need them. Keep the key path readable by the service account and restart after changing the key or App settings. A static `GITHUB_TOKEN` fallback still needs manual replacement when it expires.
 
-Expose the webhook through an HTTPS reverse proxy. Keep the raw request body unchanged so its HMAC verifies. The receiver accepts at most 1 MiB; configure a compatible proxy body limit. `GET /healthz` checks the listener/database only, not GitHub connectivity, token validity, or model health.
+In webhook mode, expose the webhook through an HTTPS reverse proxy. Keep the raw request body unchanged so its HMAC verifies. The receiver accepts at most 1 MiB; configure a compatible proxy body limit. `GET /healthz` checks the listener/database only, not GitHub connectivity, token validity, or model health. In `GITHUB_EVENT_SOURCE=poll` mode, the service starts no HTTP listener, so it needs no public proxy or inbound port.
 
-The setup console is a separate loopback service. To make it available over private tailnet HTTPS, follow [Reach the local console over Tailscale](tailscale.md). That private URL cannot receive GitHub webhooks; expose the webhook receiver separately.
+Alternatively, deploy the [Cloudflare relay](cloudflare-relay.md) and let this service pull signed deliveries over outbound HTTPS. This adds a remote buffer for host downtime; messages are acknowledged after local SQLite commit. Inspect Cloudflare queue age and DLQ state as well as local jobs. Relay failures log `cloudflare_relay_poll`, `cloudflare_relay_message`, `cloudflare_relay_payload`, `cloudflare_relay_persistence`, or `cloudflare_relay_ack` without payloads or credentials. The local health endpoint does not verify the relay connection.
+
+The setup console is a separate loopback service. To make it available over private tailnet HTTPS, follow [Reach the local console over Tailscale](tailscale.md). That private URL cannot receive GitHub webhooks; webhook mode needs a separate public ingress, while API polling uses only outbound requests.
+
+For GitHub API polling, configure `GITHUB_EVENT_SOURCE=poll` and keep `GITHUB_POLL_INTERVAL_MS` between 10000 and 3600000 (default 60000). Run one poller per repository and `DATA_DIR` to avoid redundant API calls. The GitHub App or token needs Issues read; Issues write is needed when feedback is enabled. No webhook secret, listener, or Cloudflare relay is active in this mode. The polling cursor is stored in `DATA_DIR/queue.sqlite`, survives a process restart, and belongs in the normal SQLite backup. Polling begins at first activation rather than backfilling; open issues updated afterward can qualify once. See [polling operations and limits](github-polling.md).
 
 ## Inspect and recover work
 
@@ -63,6 +67,8 @@ Workers recover abandoned jobs after lease expiry and exponential backoff, start
 ## Recover deliveries missed during downtime
 
 GitHub does not automatically redeliver a failed webhook. Inspect the App's delivery history and request redelivery after restoring the endpoint. Accepted delivery IDs are deduplicated. GitHub describes its recovery options in [handling failed deliveries](https://docs.github.com/en/webhooks/using-webhooks/handling-failed-webhook-deliveries).
+
+In poll mode there is no webhook delivery history. A rate-limited or failed scan retains its cursor and resumes after the requested delay; inspect `github_poll_rate-limit` and `github_poll_poll` service log events plus the GitHub installation's REST rate-limit headers if polling stalls. Each feed scan is capped at 50 pages (up to 5,000 items). If more than 5,000 items remain between its cursor and the current snapshot, the scan fails without advancing its cursor and cannot make progress automatically. Operator intervention is required, such as reviewing whether to raise the page limit; do not manually advance or delete the cursor, since doing so can skip issues or comments.
 
 If you saved a raw GitHub payload, you can ingest it locally:
 
@@ -98,6 +104,7 @@ The queue uses WAL and `synchronous=FULL` on local storage. Acknowledged jobs ar
 | HTTP 202 but no job | Inspect `ignored:true`: repository/action/filter mismatch, unprefixed comment, bot comment, PR event, malformed payload, or harmless `ping`. |
 | GitHub REST 401 or explicit Git authentication rejection | App authentication refreshes and retries once. Check the App key, installation, repository access, and service logs. A clone/fetch 404, permission denial, or network failure does not trigger an auth retry; inspect the underlying repository or connectivity issue. Failures then follow the normal job retry behavior. Static tokens must be replaced manually when expired. |
 | GitHub 403 | Check installed permissions, organization approval, rate limits, and the App installation status. |
+| Poller repeatedly logs a rate-limit or scan error | Check GitHub's `Retry-After` and `x-ratelimit-reset` headers, Issues read permission, configured interval, and scan page cap. Polling is snapshot-based and does not backfill its initial cutoff; see [polling behavior](github-polling.md). |
 | Installation lookup or token minting fails | Check repository spelling, installation account, selected repositories, App key/client ID pair, and that the installation accepted current permissions. An explicit installation ID must be positive and belong to this App/repository. |
 | JWT authentication fails | Check the PEM/client ID pair and host clock. An OAuth client secret cannot sign an App JWT. |
 | Job done, no comment | Inspect outbox entries, token, and Issues write permission. Retry the effect after fixing the error. |
@@ -105,6 +112,6 @@ The queue uses WAL and `synchronous=FULL` on local storage. Acknowledged jobs ar
 | `node`, `npm`, or `git` unavailable inside agent | Expected: just-bash has no arbitrary host binaries. Add a deliberate validation capability. |
 | Service says set a model/key | Configure the model adapter or provide a trusted `createModel` extension. GitHub authentication is not model authentication. |
 | Multiple service instances show unexpected jobs | Verify each intended repository has the correct `DATA_DIR` and `GITHUB_REPOSITORY`. Per-process concurrency adds across processes. |
-| Old issue ignored | There is no automatic backfill. Reopen it, add a qualifying label, post a new qualifying comment, or replay its saved event. |
+| Old issue ignored | There is no automatic historical backfill. In poll mode, an open issue updated after the first-activation cutoff can qualify once; in webhook mode, create a qualifying event or replay its saved payload. |
 
 Outgoing feedback remains at least once. Comment markers reconcile normal retries, but an external POST cannot participate in SQLite's completion transaction, so a narrow duplicate-comment race remains possible. See [architecture](architecture.md) and [verification](verification.md) for those boundaries.

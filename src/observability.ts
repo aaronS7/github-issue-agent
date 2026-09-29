@@ -41,7 +41,8 @@ function cleanValue(value: unknown, secrets: readonly string[]): unknown {
 
 export function redactObservationValue(value: unknown, values: readonly (string | undefined)[]): unknown {
   return cleanValue(value, secretValues([...values, process.env.MODEL_API_KEY,
-    process.env.ANTHROPIC_API_KEY, process.env.GITHUB_TOKEN, process.env.GITHUB_WEBHOOK_SECRET]));
+    process.env.ANTHROPIC_API_KEY, process.env.GITHUB_TOKEN, process.env.GITHUB_WEBHOOK_SECRET,
+    process.env.CLOUDFLARE_API_TOKEN, process.env.CLOUDFLARE_RELAY_TOKEN]));
 }
 
 function boundedJson(value: unknown): string {
@@ -119,7 +120,8 @@ export class RunObserver {
 
   constructor(private readonly options: RunObserverOptions) {
     this.secrets = secretValues([...(options.redactValues ?? []), process.env.MODEL_API_KEY,
-      process.env.ANTHROPIC_API_KEY, process.env.GITHUB_TOKEN, process.env.GITHUB_WEBHOOK_SECRET]);
+      process.env.ANTHROPIC_API_KEY, process.env.GITHUB_TOKEN, process.env.GITHUB_WEBHOOK_SECRET,
+      process.env.CLOUDFLARE_API_TOKEN, process.env.CLOUDFLARE_RELAY_TOKEN]);
     const recording = options.recording;
     this.maxCastBytes = recording?.maxBytes ?? 10_485_760;
     mkdirSync(options.dataDir, { recursive: true, mode: 0o700 });

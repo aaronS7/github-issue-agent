@@ -18,6 +18,7 @@ export interface GitHubAppAuthOptions {
   apiUrl?: string;
   installationId?: number;
   feedback?: boolean;
+  issuesRead?: boolean;
 }
 
 export interface GitHubAppAuthDependencies {
@@ -70,6 +71,7 @@ export class GitHubAppAuth implements GitHubTokenProvider {
   private readonly repositoryPath: string;
   private readonly base: string;
   private readonly feedback: boolean;
+  private readonly issuesRead: boolean;
   private readonly fetchImpl: typeof fetch;
   private readonly now: () => number;
   private readonly fixedInstallationId: boolean;
@@ -95,6 +97,7 @@ export class GitHubAppAuth implements GitHubTokenProvider {
     this.installationId = options.installationId;
     this.fixedInstallationId = options.installationId !== undefined;
     this.feedback = options.feedback ?? true;
+    this.issuesRead = options.issuesRead ?? false;
     this.fetchImpl = dependencies.fetch ?? globalThis.fetch;
     this.now = dependencies.now ?? Date.now;
   }
@@ -181,7 +184,7 @@ export class GitHubAppAuth implements GitHubTokenProvider {
     const jwt = this.jwt();
     let id = this.installationId ?? await this.discover(jwt);
     const body = { repositories: [this.name], permissions: {
-      contents: 'read', ...(this.feedback ? { issues: 'write' } : {}),
+      contents: 'read', ...(this.feedback ? { issues: 'write' } : this.issuesRead ? { issues: 'read' } : {}),
     } };
     let issued: unknown;
     try {

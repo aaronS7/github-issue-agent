@@ -4,6 +4,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { parseEnv } from 'node:util';
 import { loadConfig } from './config.js';
 import { isRepositoryName } from './repository.js';
+import { loadCloudflareRelayConfig } from './cloudflare-relay.js';
 
 export const DEFAULT_VALUES: Readonly<Record<string, string>> = Object.freeze({
   GITHUB_REPOSITORY: '', GITHUB_APP_CLIENT_ID: '', GITHUB_APP_PRIVATE_KEY_PATH: '',
@@ -13,11 +14,15 @@ export const DEFAULT_VALUES: Readonly<Record<string, string>> = Object.freeze({
   MAX_ATTEMPTS: '3', MAX_STEPS: '40', RUN_TIMEOUT_MS: '600000',
   ISSUE_ACTIONS: 'opened,reopened,labeled', ISSUE_LABELS: '', ISSUE_AUTHORS: '',
   BOT_LOGINS: '', COMMENT_PREFIX: '/agent', GITHUB_FEEDBACK: 'true',
+  GITHUB_EVENT_SOURCE: 'webhook', GITHUB_POLL_INTERVAL_MS: '60000',
   EXTENSIONS: '', GITHUB_SERVER_URL: '', GITHUB_API_URL: '',
   ASCIINEMA_ENABLED: 'false', ASCIINEMA_COLS: '100', ASCIINEMA_ROWS: '28',
   ASCIINEMA_MAX_BYTES: '10485760',
+  CLOUDFLARE_RELAY_URL: '', CLOUDFLARE_ACCOUNT_ID: '', CLOUDFLARE_QUEUE_ID: '',
+  CLOUDFLARE_POLL_INTERVAL_MS: '5000',
 });
-export const SECRET_KEYS = ['GITHUB_WEBHOOK_SECRET', 'GITHUB_TOKEN', 'MODEL_API_KEY'] as const;
+export const SECRET_KEYS = ['GITHUB_WEBHOOK_SECRET', 'GITHUB_TOKEN', 'MODEL_API_KEY',
+  'CLOUDFLARE_API_TOKEN', 'CLOUDFLARE_RELAY_TOKEN'] as const;
 const secretKeys = new Set<string>([...SECRET_KEYS, 'ANTHROPIC_API_KEY']);
 const valueKeys = new Set(Object.keys(DEFAULT_VALUES));
 const managedKeys = new Set([...valueKeys, ...secretKeys]);
@@ -26,6 +31,8 @@ const integerBounds: Record<string, [number, number]> = {
   CONCURRENCY: [1, 64], LEASE_MS: [3000, 2147483647], MAX_ATTEMPTS: [1, 100],
   MAX_STEPS: [1, 1000], RUN_TIMEOUT_MS: [1000, 2147483647],
   ASCIINEMA_COLS: [40, 240], ASCIINEMA_ROWS: [10, 100], ASCIINEMA_MAX_BYTES: [65536, 104857600],
+  CLOUDFLARE_POLL_INTERVAL_MS: [1000, 300000],
+  GITHUB_POLL_INTERVAL_MS: [10000, 3600000],
 };
 
 export interface ConfigDraft {
@@ -161,6 +168,7 @@ export function validateFields(env: Record<string, string>, ready = false): Reco
   if (env.GITHUB_REPOSITORY && !isRepositoryName(env.GITHUB_REPOSITORY)) errors.GITHUB_REPOSITORY = 'Use owner/repository';
   if (env.MODEL_PROVIDER && !['anthropic', 'openai-compatible'].includes(env.MODEL_PROVIDER)) errors.MODEL_PROVIDER = 'Choose a supported provider';
   if (env.GITHUB_FEEDBACK && !['true', 'false'].includes(env.GITHUB_FEEDBACK)) errors.GITHUB_FEEDBACK = 'Use true or false';
+  if (env.GITHUB_EVENT_SOURCE && !['webhook', 'poll'].includes(env.GITHUB_EVENT_SOURCE)) errors.GITHUB_EVENT_SOURCE = 'Choose webhook or poll';
   if (env.ASCIINEMA_ENABLED && !['true', 'false'].includes(env.ASCIINEMA_ENABLED)) errors.ASCIINEMA_ENABLED = 'Use true or false';
   for (const [key, [min, max]] of Object.entries(integerBounds)) {
     const value = env[key];
@@ -169,6 +177,15 @@ export function validateFields(env: Record<string, string>, ready = false): Reco
     }
   }
   for (const key of ['GITHUB_SERVER_URL', 'GITHUB_API_URL', 'MODEL_BASE_URL']) plainUrl(env[key] ?? '', key, errors);
+  if (env.CLOUDFLARE_RELAY_URL) {
+    try {
+      const url = new URL(env.CLOUDFLARE_RELAY_URL);
+      if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash || url.pathname !== '/') throw new Error();
+    } catch { errors.CLOUDFLARE_RELAY_URL = 'Enter an HTTPS origin without a path, query, or credentials'; }
+  }
+  for (const key of ['CLOUDFLARE_ACCOUNT_ID', 'CLOUDFLARE_QUEUE_ID']) {
+    if (env[key] && !/^[a-fA-F0-9]{32}$/.test(env[key])) errors[key] = 'Enter the 32-character hexadecimal ID';
+  }
   for (const key of managedKeys) {
     const value = env[key];
     if (value === undefined) continue;
@@ -176,10 +193,14 @@ export function validateFields(env: Record<string, string>, ready = false): Reco
     catch { errors[key] = 'This value cannot be saved to a Node .env file'; }
   }
   if (ready) {
-    for (const [key, message] of [
-      ['GITHUB_REPOSITORY', 'Enter a repository'],
-      ['GITHUB_WEBHOOK_SECRET', 'Enter a webhook secret'],
-    ] as const) if (!env[key] && !errors[key]) errors[key] = message;
+    try { if (env.GITHUB_EVENT_SOURCE !== 'poll') loadCloudflareRelayConfig(env); }
+    catch (error) {
+      const message = error instanceof Error ? error.message : 'Invalid Cloudflare relay settings';
+      const key = message.match(/CLOUDFLARE_[A-Z_]+/)?.[0] ?? 'CLOUDFLARE_RELAY_URL';
+      errors[key] = message;
+    }
+    if (!env.GITHUB_REPOSITORY && !errors.GITHUB_REPOSITORY) errors.GITHUB_REPOSITORY = 'Enter a repository';
+    if (env.GITHUB_EVENT_SOURCE !== 'poll' && !env.GITHUB_WEBHOOK_SECRET) errors.GITHUB_WEBHOOK_SECRET = 'Enter a webhook secret';
     const provider = env.MODEL_PROVIDER || 'anthropic';
     if (!env.EXTENSIONS) {
       if (!env.MODEL) errors.MODEL = 'Enter a model ID';
@@ -192,8 +213,10 @@ export function validateFields(env: Record<string, string>, ready = false): Reco
     if (appConfigured) {
       if (!env.GITHUB_APP_CLIENT_ID) errors.GITHUB_APP_CLIENT_ID = 'Enter the GitHub App client ID';
       if (!env.GITHUB_APP_PRIVATE_KEY_PATH) errors.GITHUB_APP_PRIVATE_KEY_PATH = 'Enter the GitHub App private key path';
-    } else if (env.GITHUB_FEEDBACK !== 'false' && !env.GITHUB_TOKEN) {
-      errors.GITHUB_TOKEN = 'Enter GitHub App credentials or a GitHub token, or disable feedback';
+    } else if ((env.GITHUB_EVENT_SOURCE === 'poll' || env.GITHUB_FEEDBACK !== 'false') && !env.GITHUB_TOKEN) {
+      errors.GITHUB_TOKEN = env.GITHUB_EVENT_SOURCE === 'poll'
+        ? 'Polling requires GitHub App credentials or a GitHub token'
+        : 'Enter GitHub App credentials or a GitHub token, or disable feedback';
     }
     if (!Object.keys(errors).length) {
       try { loadConfig(env); }

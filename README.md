@@ -4,13 +4,15 @@ A GitHub issue starts a code-editing agent whose only model tool is **just-bash*
 
 GitHub comments and reactions use a separate durable outbox. You can compose additional tools as just-bash commands and return feedback from lifecycle hooks.
 
-See the [documentation index](docs/start-here.md) for setup, daily usage, operations, extensions, and a step-by-step [GitHub App guide](docs/github-app.md).
+See the [documentation index](docs/start-here.md) for setup, daily usage, operations, extensions, a step-by-step [GitHub App guide](docs/github-app.md), and [polling GitHub without webhooks](docs/github-polling.md).
 
 The local console includes a **Runs** page with an always-on event timeline and optional local asciinema replay of agent command chunks. Recordings default off and playback is a snapshot; see the [observability guide](docs/observability.md) for configuration, limits, privacy, and exports.
 
 ## Configure in the local console
 
 Run `npm run ui` to build and start the loopback-only setup console at `http://127.0.0.1:3100`. It edits the selected `.env` file and provides configuration and optional live GitHub checks; restart the service after saving. See the [setup console guide](docs/ui.md) for development commands, secret handling, and check behavior.
+
+For a public webhook that accepts deliveries while the agent host is offline, use the optional [Cloudflare relay template](deploy/cloudflare/README.md). A Worker verifies GitHub signatures, stores raw payloads in private R2, and queues delivery pointers. The local service pulls over HTTPS and acknowledges messages after SQLite persistence. The [deployment guide](docs/cloudflare-relay.md) includes Wrangler commands and a handoff for another coding agent; direct webhooks remain available.
 
 ## Try it without credentials
 
@@ -35,13 +37,13 @@ Tests cover HTTP signatures, malformed events, filters, concurrent deliveries, S
 
 ## Connect GitHub
 
-1. Copy `.env.example` to `.env`. Set `GITHUB_REPOSITORY=owner/repository` and a random `GITHUB_WEBHOOK_SECRET`. For GitHub App authentication, set `GITHUB_APP_CLIENT_ID` and `GITHUB_APP_PRIVATE_KEY_PATH`; optionally set `GITHUB_APP_INSTALLATION_ID` to a positive numeric installation ID. Otherwise the service discovers the installation for the configured repository. A static `GITHUB_TOKEN` remains supported as a fallback.
+1. Copy `.env.example` to `.env` and set `GITHUB_REPOSITORY=owner/repository`. The default `GITHUB_EVENT_SOURCE=webhook` requires a random `GITHUB_WEBHOOK_SECRET`. For GitHub App authentication, set `GITHUB_APP_CLIENT_ID` and `GITHUB_APP_PRIVATE_KEY_PATH`; optionally set `GITHUB_APP_INSTALLATION_ID` to a positive numeric installation ID. Otherwise the service discovers the installation for the configured repository. A static `GITHUB_TOKEN` remains supported as a fallback. To use polling instead, set `GITHUB_EVENT_SOURCE=poll`; a GitHub App or token is required for Issues read access. Polling does not need a webhook secret or public endpoint. See [polling setup and limits](docs/github-polling.md).
 2. Set `MODEL_PROVIDER`, `MODEL`, and `MODEL_API_KEY`. The included adapters support Anthropic and a provider with a compatible chat-completions API (`MODEL_PROVIDER=openai-compatible` plus `MODEL_BASE_URL`). Model selection is independent of the GitHub integration.
-3. Run `npm run build && npm start`. Put an HTTPS reverse proxy in front of the listener; the default bind address is `127.0.0.1:3000`.
-4. In your repository's **Settings → Webhooks**, set the payload URL to `https://your-host/webhooks/github`, content type to `application/json`, and the same secret. Subscribe to **Issues** and **Issue comments**.
-5. Open an issue. Use a comment starting with `/agent` for a follow-up. `GET /healthz` reports whether the service and database are reachable.
+3. Run `npm run build && npm start`. In webhook mode, put an HTTPS reverse proxy in front of the listener; the default bind address is `127.0.0.1:3000`. Poll mode does not start that listener and needs no public endpoint.
+4. In webhook mode, set the GitHub App's webhook URL to `https://your-host/webhooks/github`, content type to `application/json`, and the same secret. Subscribe to **Issues** and **Issue comments**. In poll mode, leave App webhook delivery inactive and skip this step.
+5. Open an issue. Use a comment starting with `/agent` for a follow-up. In webhook mode, `GET /healthz` reports whether the listener and database are reachable; poll mode has no HTTP listener or health endpoint.
 
-By default, opened, reopened, and labeled issues qualify without a label or author restriction. Bot-authored issues also qualify. Bot comments and comments containing the agent's output marker are ignored to prevent reply loops. Set `BOT_LOGINS` when using a regular user account as the bot, including for commands posted outside this service.
+In webhook mode, opened, reopened, and labeled issues qualify without a label or author restriction. Bot-authored issues also qualify. Bot comments and comments containing the agent's output marker are ignored to prevent reply loops. Poll mode instead schedules eligible open issues once from its first-activation cutoff. Set `BOT_LOGINS` when using a regular user account as the bot, including for commands posted outside this service.
 
 `BASE_REF=HEAD` uses the repository's default branch when its managed source is cloned. Set `BASE_REF=main` (or another branch) explicitly if needed. `REPOSITORY_PATH` optionally supplies an existing local repository instead of cloning GitHub. Local uncommitted changes are not included. Submodules and Git LFS downloads are not initialized.
 
@@ -58,7 +60,9 @@ git -C /path/to/your/checkout switch -c agent/issue-123 FETCH_HEAD
 
 | Setting | Default | Behavior |
 | --- | --- | --- |
-| `ISSUE_ACTIONS` | `opened,reopened,labeled` | Issue webhook actions that start runs. |
+| `GITHUB_EVENT_SOURCE` | `webhook` | Choose `webhook` or `poll`; poll mode needs GitHub Issues read access and does not start the HTTP webhook listener. |
+| `GITHUB_POLL_INTERVAL_MS` | `60000` | Poll interval in milliseconds, 10000–3600000 (10 seconds–1 hour). |
+| `ISSUE_ACTIONS` | `opened,reopened,labeled` | Issue webhook actions that start runs; ignored in poll mode, where eligible open issues are presented as `opened`. |
 | `ISSUE_LABELS` | unset | Comma-separated labels; all must be present. |
 | `ISSUE_AUTHORS` | unset | Comma-separated allowed **issue authors**. Also applies to follow-up comments. |
 | `COMMENT_PREFIX` | `/agent` | Required prefix for new comments. Empty accepts every non-bot comment. |
@@ -76,9 +80,9 @@ git -C /path/to/your/checkout switch -c agent/issue-123 FETCH_HEAD
 | `ASCIINEMA_COLS` / `ASCIINEMA_ROWS` | `100` / `28` | Recorded terminal dimensions (columns 40–240; rows 10–100). |
 | `ASCIINEMA_MAX_BYTES` | `10485760` | Per-attempt recording limit, 65536–104857600 bytes. |
 
-Issues are processed in delivery order per repository/issue. A retry blocks later events for that issue until it succeeds or reaches the attempt limit. Other issues can run concurrently. Label changes can queue another run; delivery IDs deduplicate redelivery of the same webhook.
+Webhook deliveries and poll results are processed in local arrival order per repository/issue. A retry blocks later work for that issue until it succeeds or reaches the attempt limit. Other issues can run concurrently. Webhook label changes can queue another run; polling schedules each eligible issue once, while a new matching `/agent` comment requests a follow-up.
 
-Events are snapshots: the agent sees the issue and triggering comment from that delivery, plus the previous completed run's summary and files. Historical comments are not fetched. Existing issues are not backfilled automatically. GitHub reactions are outgoing feedback; they do not trigger runs.
+Events are snapshots: the agent sees the issue and triggering comment, plus the previous completed run's summary and files. Historical comments are not fetched. Polling sets a first-activation cutoff rather than backfilling old issues/comments, though an older open issue updated after that cutoff can qualify once. Polling observes REST snapshots and cannot promise GitHub's original event chronology. GitHub reactions are outgoing feedback; they do not trigger runs.
 
 ## Add tools and lifecycle hooks
 

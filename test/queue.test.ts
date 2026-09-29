@@ -264,13 +264,16 @@ test('online backup is consistent and refuses to replace an existing file', asyn
   try {
     const q = f.open();
     q.enqueue(event('backup-first'));
+    q.setIngestionState('github-poll:fixture', { issuesSince: '2026-09-28T12:00:00Z', version: 1 });
     const destination = `${f.path}.backup`;
     await q.backup(destination);
     q.enqueue(event('backup-second'));
+    q.setIngestionState('github-poll:fixture', { issuesSince: '2026-09-28T13:00:00Z', version: 1 });
     await assert.rejects(q.backup(destination), { code: 'EEXIST' });
     const restored = new DurableQueue(destination);
     assert.equal(restored.listJobs().length, 1);
     assert.equal(restored.listJobs()[0]?.deliveryId, 'backup-first');
+    assert.deepEqual(restored.getIngestionState('github-poll:fixture'), { issuesSince: '2026-09-28T12:00:00Z', version: 1 });
     restored.close(); q.close();
   } finally { f.cleanup(); }
 });

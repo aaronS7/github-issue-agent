@@ -20,7 +20,10 @@
     "ui:api": "node --import tsx -- src/control-cli.ts",
     "ui:dev": "vite --config ui/vite.config.ts",
     "test:ui": "npm run build:ui && playwright test",
-    "demo:recording": "tsx src/demo.ts --record"
+    "demo:recording": "tsx src/demo.ts --record",
+    "cloudflare:check": "npm --prefix deploy/cloudflare run check && npm --prefix deploy/cloudflare test",
+    "cloudflare:dry-run": "npm --prefix deploy/cloudflare run dry-run",
+    "cloudflare:deploy": "npm --prefix deploy/cloudflare run deploy"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "4.0.65",

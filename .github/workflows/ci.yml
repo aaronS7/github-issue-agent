@@ -23,3 +23,18 @@ jobs:
       - run: npx playwright test
       - run: npm run demo
       - run: npm run demo:recording
+  cloudflare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: deploy/cloudflare/package-lock.json
+      - run: npm ci
+        working-directory: deploy/cloudflare
+      - run: npm run cloudflare:check
+      - run: npm run cloudflare:dry-run

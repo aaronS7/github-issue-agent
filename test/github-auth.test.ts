@@ -14,6 +14,20 @@ function tokenResponse(token: string, expiresAt: number): Response {
     { status: 201 });
 }
 
+test('polling without feedback requests Issues read permission on renewed App tokens', async () => {
+  let now = baseNow, requests = 0;
+  const auth = new GitHubAppAuth({ ...options, installationId: 123, feedback: false, issuesRead: true }, {
+    now: () => now,
+    fetch: async (_url, init) => {
+      assert.deepEqual(JSON.parse(String(init?.body)).permissions, { contents: 'read', issues: 'read' });
+      return tokenResponse(`poll-token-${++requests}`, now + 120_000);
+    },
+  });
+  assert.equal(await auth.getToken(), 'poll-token-1');
+  now += 60_000;
+  assert.equal(await auth.getToken(), 'poll-token-2');
+});
+
 test('signs JWT and scopes token to repository with optional feedback', async () => {
   for (const feedback of [true, false]) {
     const calls: { url: string; init: RequestInit }[] = [];

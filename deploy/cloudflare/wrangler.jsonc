@@ -1,0 +1,20 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "github-issue-webhook-relay",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-28",
+  "workers_dev": true,
+  "preview_urls": false,
+  "observability": { "enabled": false },
+  "vars": {
+    "GITHUB_REPOSITORY": "CHANGE_ME_OWNER/REPO"
+  },
+  "queues": {
+    "producers": [
+      { "binding": "WEBHOOK_QUEUE", "queue": "github-issue-webhooks" }
+    ]
+  },
+  "r2_buckets": [
+    { "binding": "WEBHOOK_PAYLOADS", "bucket_name": "github-issue-webhook-payloads" }
+  ]
+}

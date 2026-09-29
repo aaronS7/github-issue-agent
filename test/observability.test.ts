@@ -9,7 +9,7 @@ import { defineCommand } from 'just-bash';
 import { runAgent, type AgentTraceEvent } from '../src/agent.js';
 import { loadConfig } from '../src/config.js';
 import { ScriptedModel } from '../src/model.js';
-import { RunObserver } from '../src/observability.js';
+import { redactObservationValue, RunObserver } from '../src/observability.js';
 import type { QueueJob } from '../src/queue.js';
 
 function job(): QueueJob {
@@ -18,6 +18,35 @@ function job(): QueueJob {
     leaseToken: 'lease', leaseExpiresAt: Date.now() + 1000, lastError: null, result: null };
 }
 const recording = { asciinema: true, cols: 100, rows: 28, maxBytes: 65_536 };
+
+test('Cloudflare environment credentials are redacted from metadata, events, and recordings', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'relay-observation-'));
+  const names = ['CLOUDFLARE_API_TOKEN', 'CLOUDFLARE_RELAY_TOKEN'] as const;
+  const previous = names.map(name => process.env[name]);
+  const secrets = ['fixture-private-cloudflare-api-value', 'fixture-private-relay-auth-value'];
+  try {
+    names.forEach((name, index) => { process.env[name] = secrets[index]; });
+    const content = secrets.join(' ');
+    assert.deepEqual(redactObservationValue({ message: content }, []), { message: '[REDACTED] [REDACTED]' });
+    const observer = new RunObserver({ dataDir: root, job: job(), recording });
+    observer.trace({ type: 'command', step: 1, script: 'echo diagnostic', stdout: content,
+      stderr: '', exitCode: 0, durationMs: 1 });
+    observer.finish('succeeded', { summary: content });
+    const cast = await readFile(observer.recordingPath!, 'utf8');
+    const db = new DatabaseSync(join(root, 'observability.sqlite'), { readOnly: true });
+    try {
+      const persisted = JSON.stringify({ events: db.prepare('SELECT * FROM run_events').all(),
+        attempts: db.prepare('SELECT * FROM run_attempts').all() });
+      for (const secret of secrets) assert.equal((cast + persisted).includes(secret), false);
+      assert.match(cast + persisted, /\[REDACTED\]/);
+    } finally { db.close(); }
+  } finally {
+    names.forEach((name, index) => {
+      if (previous[index] === undefined) delete process.env[name]; else process.env[name] = previous[index];
+    });
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test('asciinema settings default off and validate dimensions and byte limit', () => {
   const base = { GITHUB_REPOSITORY: 'owner/repo', GITHUB_WEBHOOK_SECRET: 'secret', GITHUB_FEEDBACK: 'false' };

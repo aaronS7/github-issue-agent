@@ -1,12 +1,12 @@
 # Set up a GitHub App
 
-The service can receive a GitHub App's webhooks and use its private key to mint and refresh installation tokens automatically for Git and REST calls. The standalone minting helper remains available for optional manual debugging and legacy static-token setups.
+The service can receive a GitHub App's webhooks or poll GitHub's REST API, and use its private key to mint and refresh installation tokens automatically for Git and REST calls. Polling is useful when the host cannot receive inbound webhooks. The standalone minting helper remains available for optional manual debugging and legacy static-token setups.
 
 ## 1. Register the App
 
 In the owning account or organization, open **Settings → Developer settings → GitHub Apps → New GitHub App**. Use a unique name and a homepage URL you control. For this installation-only service, leave OAuth/user-authorization and device-flow options off; it has no OAuth callback or setup handler. GitHub's [registration guide](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/registering-a-github-app) describes those fields.
 
-Configure the App's webhook:
+For webhook mode (the default), configure the App's webhook:
 
 | Field | Value |
 | --- | --- |
@@ -24,6 +24,10 @@ openssl rand -hex 32
 
 Store the value in the App settings and service configuration. It authenticates inbound webhook payloads; it is separate from the App private key and installation token.
 
+For poll mode, disable App webhook delivery. Polling needs no webhook URL or secret, public inbound listener, or Cloudflare relay. Set `GITHUB_EVENT_SOURCE=poll` and follow [Poll GitHub without webhooks](github-polling.md). Keep the App private key on the service host.
+
+For the optional [Cloudflare relay](cloudflare-relay.md) in webhook mode, use the deployed Worker URL plus `/webhooks/github` as the App's webhook URL. Store the same webhook secret in the Worker and local service. The relay's accepted response means Cloudflare has persisted the delivery; the local job appears after the service pulls it.
+
 ## 2. Grant permissions and subscribe to events
 
 Use these repository permissions for the currently implemented behavior:
@@ -31,12 +35,12 @@ Use these repository permissions for the currently implemented behavior:
 | Permission | Access | Purpose |
 | --- | --- | --- |
 | Contents | Read-only | Clone the repository and refresh the source cache. |
-| Issues | Read & write | Post replies and create reactions when feedback is enabled. |
+| Issues | Read | Required for REST polling. Add write access when feedback is enabled, for posting replies and reactions. |
 | Metadata | Read-only | GitHub's standard repository metadata access. |
 
-Subscribe to **Issues** (`issues`) and **Issue comment** (`issue_comment`). Pull-request events are not used. The current service does not push code or create PRs, so it does not need Contents write or Pull requests write. GitHub documents [permission selection](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/choosing-permissions-for-a-github-app), [comment creation](https://docs.github.com/en/rest/issues/comments#create-an-issue-comment), and [reaction creation](https://docs.github.com/en/rest/reactions/reactions#create-reaction-for-an-issue).
+Subscribe to **Issues** (`issues`) and **Issue comment** (`issue_comment`) only for webhook mode. Poll mode uses REST snapshots and needs no webhook subscriptions. Pull-request events are not used. The current service does not push code or create PRs, so it does not need Contents write or Pull requests write. GitHub documents [permission selection](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/choosing-permissions-for-a-github-app), [comment creation](https://docs.github.com/en/rest/issues/comments#create-an-issue-comment), and [reaction creation](https://docs.github.com/en/rest/reactions/reactions#create-reaction-for-an-issue).
 
-Create the App. This App webhook supplies the events; do not also add a repository webhook for the same service just to make the App work.
+Create the App. In webhook mode, this App webhook supplies events; do not also add a repository webhook for the same service just to make the App work. In poll mode, leave webhook delivery disabled.
 
 ## 3. Install it on the repository
 
@@ -75,7 +79,7 @@ GITHUB_FEEDBACK=true
 
 Set both `GITHUB_APP_CLIENT_ID` and `GITHUB_APP_PRIVATE_KEY_PATH` to enable App authentication. If only one is set, startup rejects the incomplete configuration. When both are set, App authentication takes precedence over `GITHUB_TOKEN`; otherwise `GITHUB_TOKEN` is used as a static-token fallback. The key is read and validated as an RSA key at startup and held by the service process. Restart the service to apply configuration changes or rotate the key.
 
-The provider requests a token scoped to `GITHUB_REPOSITORY` with **Contents: read** and, when `GITHUB_FEEDBACK=true`, **Issues: write**. With feedback disabled, it requests only Contents read. Configure the App's repository permissions accordingly, then accept any updated permissions on the installation.
+The provider requests a token scoped to `GITHUB_REPOSITORY` with **Contents: read**. When `GITHUB_FEEDBACK=true`, it also requests **Issues: write**. With feedback disabled, it requests **Issues: read** in poll mode and no Issues permission in webhook mode. Configure the App's repository permissions accordingly, then accept any updated permissions on the installation.
 
 The first GitHub request obtains a token. The process shares one in-memory token provider, and concurrent requests share an in-progress refresh. It refreshes on demand when the cached token is within 60 seconds of expiry. Each REST call and each Git clone or fetch asks the provider for a usable token; it reuses the cached token until refresh is due. A REST 401 or explicit Git authentication rejection causes one refresh and retry. A Git 404, permission denial, or network failure does not trigger an authentication retry; it follows the normal job retry policy. Other REST failures follow the normal queue or outbox retry behavior.
 

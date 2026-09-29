@@ -4,6 +4,7 @@ import { Badge, Button, CodeBlock, ExternalLinkButton, Section } from '../compon
 import type { Configuration } from '../lib/use-configuration';
 
 export function SetupPage({ config }: { config: Configuration }) {
+  const polling = config.values.GITHUB_EVENT_SOURCE === 'poll';
   const github = config.values.GITHUB_SERVER_URL || 'https://github.com';
   let newApp = 'https://github.com/settings/apps/new';
   try { const url = new URL(github); if (url.protocol === 'https:' && !url.username && !url.password) newApp = `${url.origin}/settings/apps/new`; } catch { /* Keep GitHub's standard URL. */ }
@@ -13,15 +14,20 @@ export function SetupPage({ config }: { config: Configuration }) {
       <p>In GitHub, go to Settings → Developer settings → GitHub Apps → New GitHub App. Choose a name and a homepage URL you control. OAuth and device flow are not needed.</p>
       <ExternalLinkButton href={newApp}>Create a GitHub App</ExternalLinkButton>
     </Section>
-    <Section title="02 / Connect the webhook" description="GitHub needs a public HTTPS URL that reaches your bot.">
+    {polling ? <Section title="02 / Poll the GitHub API" description="Your agent retrieves work over outbound HTTPS.">
+      <p>Leave webhook delivery inactive in GitHub App settings. No public URL or webhook secret is needed. Set the interval in the GitHub tab; one minute is the default.</p>
+      <p>The first activation starts watching from the current time. Open issues updated afterward can qualify once, and new matching comments request follow-ups.</p>
+      <a href="#github" className="text-link">Configure polling<ArrowRight size={13} /></a>
+    </Section> : <Section title="02 / Connect the webhook" description="GitHub needs a public HTTPS URL that reaches your bot.">
       <CodeBlock value="https://your-domain.com/webhooks/github" label="Webhook URL" />
       <p>Enable the webhook and SSL verification. Generate a secret in the GitHub tab, then copy that same secret into GitHub. Your bot listens on port {config.values.PORT || '3000'} by default; route the public webhook URL to that listener.</p>
       <p>The configuration console is local. The public URL should reach the bot’s webhook service.</p>
+      <p>For an optional Cloudflare relay, deploy the template in <code>deploy/cloudflare</code> using <code>docs/cloudflare-relay.md</code>. Use the Worker’s <code>/webhooks/github</code> URL in GitHub, then enter its connection settings in the GitHub tab. Your agent host retrieves deliveries over HTTPS.</p>
       <a href="#github" className="text-link">Configure the webhook<ArrowRight size={13} /></a>
-    </Section>
+    </Section>}
     <Section title="03 / Set permissions & events" description="Grant only the access the current bot uses.">
       <div className="permissions-table"><div><strong>Repository permission</strong><strong>Access</strong></div><div><span>Contents</span><span>Read-only</span></div><div><span>Issues</span><span>Read & write</span></div><div><span>Metadata</span><span>Read-only</span></div></div>
-      <p>Subscribe to <strong>Issues</strong> and <strong>Issue comments</strong>. Issues write access is used for replies and reactions when feedback is enabled.</p>
+      <p>{polling ? 'Polling needs Issues read access. ' : 'Subscribe to Issues and Issue comments. '}Issues write access is used for replies and reactions when feedback is enabled.</p>
     </Section>
     <Section title="04 / Install & authenticate" description="Install the App on your chosen repository.">
       <p>Copy the App’s Client ID. Generate a private key, store the PEM file on the machine running your bot, and enter its path in Authentication. You can leave Installation ID empty; the service discovers it from your repository.</p>

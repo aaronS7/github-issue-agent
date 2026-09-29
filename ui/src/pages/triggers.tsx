@@ -11,9 +11,12 @@ const events = [
 export function TriggersPage({ config }: { config: Configuration }) {
   const selected = (config.values.ISSUE_ACTIONS ?? '').split(',').map(value => value.trim()).filter(Boolean);
   const hasFilters = Boolean(config.values.ISSUE_LABELS || config.values.ISSUE_AUTHORS);
+  const polling = config.values.GITHUB_EVENT_SOURCE === 'poll';
   return <>
-    <div className="trigger-summary"><span className="summary-icon"><Zap size={18} /></span><div><strong>{hasFilters ? 'A little more selective.' : 'Every issue is a starting point.'}</strong><p>{hasFilters ? 'Only issues matching your filters will enter the queue.' : 'All issues matching the selected events can trigger a run.'}</p></div><Badge>{hasFilters ? 'Filtered' : 'All issues'}</Badge></div>
-    <Section title="Issue events" description="Choose when your agent starts working." action={<Zap size={17} className="muted" />}>
+    <div className="trigger-summary"><span className="summary-icon"><Zap size={18} /></span><div><strong>{hasFilters ? 'A little more selective.' : 'Every issue is a starting point.'}</strong><p>{hasFilters ? 'Only issues matching your filters will enter the queue.' : polling ? 'Eligible open issues updated after first activation can trigger a run.' : 'All issues matching the selected events can trigger a run.'}</p></div><Badge>{hasFilters ? 'Filtered' : 'All issues'}</Badge></div>
+    {polling ? <Section title="Issue discovery" description="GitHub API polling is selected.">
+      <p>Each eligible open issue updated after first activation is queued once. New matching comments can request follow-ups. Label and author filters below still apply; individual webhook event choices apply only in webhook mode.</p>
+    </Section> : <Section title="Issue events" description="Choose when your agent starts working." action={<Zap size={17} className="muted" />}>
       <div className="event-list">{events.map(event => <label className="event-option" key={event.id}>
         <input type="checkbox" checked={selected.includes(event.id)} onChange={e => config.setValue('ISSUE_ACTIONS',
           (e.target.checked ? [...selected, event.id] : selected.filter(value => value !== event.id)).join(','))} />
@@ -21,7 +24,7 @@ export function TriggersPage({ config }: { config: Configuration }) {
       </label>)}</div>
       {!selected.length && <p className="field-hint">Issue events are disabled. Matching comments can still trigger runs.</p>}
       <details className="disclosure"><summary>Additional GitHub issue actions</summary><SettingField config={config} name="ISSUE_ACTIONS" hint="Comma-separated webhook action names. An empty value disables issue events." /></details>
-    </Section>
+    </Section>}
     <Section title="Issue filters" description="Leave these empty to accept issues from anyone." action={<SlidersHorizontal size={17} className="muted" />}>
       <div className="stack"><SettingField config={config} name="ISSUE_LABELS" placeholder="agent, ready" hint="Comma-separated labels. Every listed label must be on the issue." optional />
         <SettingField config={config} name="ISSUE_AUTHORS" placeholder="octocat, teammate" hint="GitHub logins of allowed issue authors. This also applies to comment-triggered runs." optional /></div>

@@ -2,9 +2,33 @@ import assert from 'node:assert/strict';
 import { resolve } from 'node:path';
 import { test } from 'node:test';
 import { loadConfig } from '../src/config.js';
+import { matchesFilters } from '../src/events.js';
 
 const base = { GITHUB_REPOSITORY: 'Owner/Repo', GITHUB_WEBHOOK_SECRET: 'test-secret' };
 const app = { GITHUB_APP_CLIENT_ID: 'Iv1.test', GITHUB_APP_PRIVATE_KEY_PATH: './private/app.pem' };
+
+test('poll mode needs authentication but no webhook secret and validates its interval', () => {
+  const env = { GITHUB_REPOSITORY: 'Owner/Repo', GITHUB_EVENT_SOURCE: 'poll', GITHUB_TOKEN: 'fixture', GITHUB_FEEDBACK: 'false' };
+  const config = loadConfig(env);
+  assert.equal(config.eventSource, 'poll');
+  assert.equal(config.pollIntervalMs, 60_000);
+  assert.equal(config.webhookSecret, '');
+  assert.throws(() => loadConfig({ ...env, GITHUB_TOKEN: '' }), /polling requires/);
+  assert.throws(() => loadConfig({ ...env, GITHUB_EVENT_SOURCE: 'other' }), /GITHUB_EVENT_SOURCE/);
+  for (const interval of ['0', '9999', '3600001', '10000.5', 'invalid']) {
+    assert.throws(() => loadConfig({ ...env, GITHUB_POLL_INTERVAL_MS: interval }), /GITHUB_POLL_INTERVAL_MS/);
+  }
+  assert.equal(loadConfig({ ...env, GITHUB_POLL_INTERVAL_MS: '10000' }).pollIntervalMs, 10_000);
+  assert.equal(loadConfig({ ...base, GITHUB_FEEDBACK: 'false' }).eventSource, 'webhook');
+  assert.throws(() => loadConfig({ ...env, GITHUB_EVENT_SOURCE: 'webhook' }), /GITHUB_WEBHOOK_SECRET/);
+});
+
+test('empty optional CSV filters allow any author while empty issue actions still disable issue triggers', () => {
+  const config = loadConfig({ ...base, GITHUB_FEEDBACK: 'false', ISSUE_AUTHORS: ' , ', ISSUE_LABELS: '', BOT_LOGINS: '' });
+  assert.equal(matchesFilters({ repository: 'owner/repo', issueNumber: 1, kind: 'issue', action: 'opened',
+    author: 'alice', title: 'Test', body: '', labels: [], url: 'https://github.com/owner/repo/issues/1' }, config.filters), true);
+  assert.deepEqual(loadConfig({ ...base, GITHUB_FEEDBACK: 'false', ISSUE_ACTIONS: '' }).filters.issueActions, []);
+});
 
 test('App configuration enables feedback without a static token and takes precedence', () => {
   const config = loadConfig({ ...base, ...app, GITHUB_TOKEN: 'expired-static-token' });
