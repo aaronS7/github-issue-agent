@@ -15,10 +15,10 @@ test('poll mode needs authentication but no webhook secret and validates its int
   assert.equal(config.webhookSecret, '');
   assert.throws(() => loadConfig({ ...env, GITHUB_TOKEN: '' }), /polling requires/);
   assert.throws(() => loadConfig({ ...env, GITHUB_EVENT_SOURCE: 'other' }), /GITHUB_EVENT_SOURCE/);
-  for (const interval of ['0', '9999', '3600001', '10000.5', 'invalid']) {
+  for (const interval of ['0', '10000', '14999', '3600001', '15000.5', 'invalid']) {
     assert.throws(() => loadConfig({ ...env, GITHUB_POLL_INTERVAL_MS: interval }), /GITHUB_POLL_INTERVAL_MS/);
   }
-  assert.equal(loadConfig({ ...env, GITHUB_POLL_INTERVAL_MS: '10000' }).pollIntervalMs, 10_000);
+  assert.equal(loadConfig({ ...env, GITHUB_POLL_INTERVAL_MS: '15000' }).pollIntervalMs, 15_000);
   assert.equal(loadConfig({ ...base, GITHUB_FEEDBACK: 'false' }).eventSource, 'webhook');
   assert.throws(() => loadConfig({ ...env, GITHUB_EVENT_SOURCE: 'webhook' }), /GITHUB_WEBHOOK_SECRET/);
 });

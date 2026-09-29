@@ -117,7 +117,7 @@ export class GitHubPoller {
     this.fetcher = options.fetch ?? fetch;
     this.now = options.now ?? Date.now;
     this.interval = options.intervalMs ?? 60_000;
-    if (!Number.isSafeInteger(this.interval) || this.interval < 10_000 || this.interval > 3_600_000) {
+    if (!Number.isSafeInteger(this.interval) || this.interval < 15_000 || this.interval > 3_600_000) {
       throw new Error('Invalid GitHub poll interval');
     }
     const { issueActions: _ignored, ...filters } = options.filters ?? {};

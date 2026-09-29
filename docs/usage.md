@@ -97,7 +97,7 @@ See [Run observability and terminal replay](observability.md) for configuration 
 | --- | --- | --- |
 | `GITHUB_REPOSITORY` | Required | One `owner/repository` per CLI instance. |
 | `GITHUB_EVENT_SOURCE` | `webhook` | `webhook` or `poll`. Polling needs Issues read access and no webhook listener/secret; see [the polling guide](github-polling.md). |
-| `GITHUB_POLL_INTERVAL_MS` | `60000` | Polling interval in milliseconds, 10000–3600000. |
+| `GITHUB_POLL_INTERVAL_MS` | `60000` | Polling interval in milliseconds, 15000–3600000. |
 | `ISSUE_ACTIONS` | `opened,reopened,labeled` | Comma-separated webhook issue actions; ignored in poll mode. |
 | `ISSUE_LABELS` | Unset | Every listed label must be present. |
 | `ISSUE_AUTHORS` | Unset | Allowed issue authors; it is not a commenter allowlist. |

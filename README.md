@@ -61,7 +61,7 @@ git -C /path/to/your/checkout switch -c agent/issue-123 FETCH_HEAD
 | Setting | Default | Behavior |
 | --- | --- | --- |
 | `GITHUB_EVENT_SOURCE` | `webhook` | Choose `webhook` or `poll`; poll mode needs GitHub Issues read access and does not start the HTTP webhook listener. |
-| `GITHUB_POLL_INTERVAL_MS` | `60000` | Poll interval in milliseconds, 10000–3600000 (10 seconds–1 hour). |
+| `GITHUB_POLL_INTERVAL_MS` | `60000` | Poll interval in milliseconds, 15000–3600000 (15 seconds–1 hour). |
 | `ISSUE_ACTIONS` | `opened,reopened,labeled` | Issue webhook actions that start runs; ignored in poll mode, where eligible open issues are presented as `opened`. |
 | `ISSUE_LABELS` | unset | Comma-separated labels; all must be present. |
 | `ISSUE_AUTHORS` | unset | Comma-separated allowed **issue authors**. Also applies to follow-up comments. |

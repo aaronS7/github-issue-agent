@@ -74,7 +74,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       ...(env.REPOSITORY_PATH ? { path: resolve(env.REPOSITORY_PATH) } : {}), baseRef: env.BASE_REF ?? 'HEAD',
     } },
     webhookSecret: env.GITHUB_WEBHOOK_SECRET ?? '', eventSource,
-    pollIntervalMs: integer(env, 'GITHUB_POLL_INTERVAL_MS', 60_000, 10_000, 3_600_000),
+    pollIntervalMs: integer(env, 'GITHUB_POLL_INTERVAL_MS', 60_000, 15_000, 3_600_000),
     host: env.HOST ?? '127.0.0.1', port: integer(env, 'PORT', 3000, 0, 65535),
     concurrency: integer(env, 'CONCURRENCY', 2, 1, 64),
     leaseMs: integer(env, 'LEASE_MS', 60_000, 3000), maxAttempts: integer(env, 'MAX_ATTEMPTS', 3, 1, 100),

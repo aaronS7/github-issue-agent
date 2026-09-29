@@ -59,7 +59,7 @@ test('poll mode completes a GitHub issue without a webhook listener or secret an
         GITHUB_TOKEN: githubToken, GITHUB_FEEDBACK: 'false',
         GITHUB_APP_CLIENT_ID: '', GITHUB_APP_PRIVATE_KEY_PATH: '', GITHUB_APP_INSTALLATION_ID: '',
         EXTENSIONS: extensionPath, REPOSITORY_PATH: source, DATA_DIR: dataDir,
-        PORT: String(port), HOST: '127.0.0.1', GITHUB_POLL_INTERVAL_MS: '10000',
+        PORT: String(port), HOST: '127.0.0.1', GITHUB_POLL_INTERVAL_MS: '15000',
         CLOUDFLARE_RELAY_URL: 'https://partial-relay.example', CLOUDFLARE_ACCOUNT_ID: '',
         CLOUDFLARE_QUEUE_ID: '', CLOUDFLARE_API_TOKEN: '', CLOUDFLARE_RELAY_TOKEN: relayToken,
         ISSUE_ACTIONS: 'opened', ISSUE_LABELS: '', ISSUE_AUTHORS: '', BOT_LOGINS: '', BASE_REF: 'HEAD',

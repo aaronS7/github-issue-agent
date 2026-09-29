@@ -62,8 +62,8 @@ export function GitHubPage({ config }: { config: Configuration }) {
         </select>
       </Field>
       {polling ? <div className="stack">
-        <SettingField config={config} name="GITHUB_POLL_INTERVAL_MS" type="number" min={10000} max={3600000} step={1000}
-          hint="Milliseconds between checks. 60000 is one minute. GitHub rate limits can delay the next check." />
+        <SettingField config={config} name="GITHUB_POLL_INTERVAL_MS" type="number" min={15000} max={3600000} step={1000}
+          hint="Milliseconds between checks. Minimum 15 seconds; 60000 is one minute. GitHub rate limits can delay the next check." />
         <p className="field-hint">Uses outbound requests with your App or token. No public endpoint or webhook secret is needed. Disable webhook delivery in your GitHub App for a polling-only setup.</p>
         <p className="field-hint">Starts with issues updated after first activation. Each eligible open issue runs once; new matching comments request follow-ups. Saved progress survives restarts.</p>
       </div> : <>

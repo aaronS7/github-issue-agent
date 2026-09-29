@@ -37,7 +37,7 @@ Alternatively, deploy the [Cloudflare relay](cloudflare-relay.md) and let this s
 
 The setup console is a separate loopback service. To make it available over private tailnet HTTPS, follow [Reach the local console over Tailscale](tailscale.md). That private URL cannot receive GitHub webhooks; webhook mode needs a separate public ingress, while API polling uses only outbound requests.
 
-For GitHub API polling, configure `GITHUB_EVENT_SOURCE=poll` and keep `GITHUB_POLL_INTERVAL_MS` between 10000 and 3600000 (default 60000). Run one poller per repository and `DATA_DIR` to avoid redundant API calls. The GitHub App or token needs Issues read; Issues write is needed when feedback is enabled. No webhook secret, listener, or Cloudflare relay is active in this mode. The polling cursor is stored in `DATA_DIR/queue.sqlite`, survives a process restart, and belongs in the normal SQLite backup. Polling begins at first activation rather than backfilling; open issues updated afterward can qualify once. See [polling operations and limits](github-polling.md).
+For GitHub API polling, configure `GITHUB_EVENT_SOURCE=poll` and keep `GITHUB_POLL_INTERVAL_MS` between 15000 and 3600000 (default 60000). Run one poller per repository and `DATA_DIR` to avoid redundant API calls. The GitHub App or token needs Issues read; Issues write is needed when feedback is enabled. No webhook secret, listener, or Cloudflare relay is active in this mode. The polling cursor is stored in `DATA_DIR/queue.sqlite`, survives a process restart, and belongs in the normal SQLite backup. Polling begins at first activation rather than backfilling; open issues updated afterward can qualify once. See [polling operations and limits](github-polling.md).
 
 ## Inspect and recover work
 

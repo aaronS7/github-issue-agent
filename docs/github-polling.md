@@ -22,7 +22,7 @@ GITHUB_FEEDBACK=true
 # GITHUB_TOKEN=your-token
 ```
 
-The polling interval defaults to 60,000 ms and accepts 10,000–3,600,000 ms (10 seconds to 1 hour). Start with the default. Run one poller for each repository and `DATA_DIR`; multiple pollers make redundant API calls. Restart the service after changing the environment. For example, when using the supplied systemd unit:
+The polling interval defaults to 60,000 ms and accepts 15,000–3,600,000 ms (15 seconds to 1 hour). Start with the default. Run one poller for each repository and `DATA_DIR`; multiple pollers make redundant API calls. Restart the service after changing the environment. For example, when using the supplied systemd unit:
 
 ```sh
 sudo systemctl restart issue-agent
@@ -44,7 +44,7 @@ GitHub recommends webhooks instead of polling when webhooks are available. This 
 
 GitHub's current primary rate limit for a GitHub App installation is at least 5,000 REST requests per hour. Installations on GitHub Enterprise Cloud organizations have a 15,000 per hour limit. Other installations scale with repository and organization-user counts above 20, by 50 requests per hour for each additional repository and user, up to 12,500 per hour. This limit applies to the installation's REST API usage, not separately to each installation token; other requests made through the same installation share it. Check response headers for the actual remaining budget and reset time.
 
-At the default interval, two base list requests per minute (issues and comments) are about 120 requests per hour for one repository before pagination, eligible-comment lookups, and feedback writes. At a 10-second interval, those base list requests alone can be about 720 per hour. Conditional 304 responses reduce primary-limit usage, but changed data, extra pages, and other App activity add requests. Keep the default interval unless you have measured a need for faster pickup. Large or busy repositories can use more requests than this simple estimate.
+At the default interval, two base list requests per minute (issues and comments) are about 120 requests per hour for one repository before pagination, eligible-comment lookups, and feedback writes. At the minimum 15-second interval, those base list requests alone can be about 480 per hour. Conditional 304 responses reduce primary-limit usage, but changed data, extra pages, and other App activity add requests. Keep the default interval unless you have measured a need for faster pickup. Large or busy repositories can use more requests than this simple estimate.
 
 Primary exhaustion returns HTTP 403 or 429 with `x-ratelimit-remaining: 0`; wait until `x-ratelimit-reset`. A secondary limit can also return 403 or 429. Honor `Retry-After` when present; otherwise wait at least one minute, then back off further if errors continue. The poller preserves its cursor while backing off, so it can resume after the rate window without treating a failed scan as complete. GitHub warns that continuing requests while limited can result in an integration ban.
 

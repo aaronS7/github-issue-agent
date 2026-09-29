@@ -102,7 +102,9 @@ test('polling configuration requires API credentials without a webhook or comple
     CLOUDFLARE_RELAY_URL: 'https://relay.example', GITHUB_POLL_INTERVAL_MS: '60000' };
   assert.deepEqual(validateFields(env, true), {});
   assert.match(validateFields({ ...env, GITHUB_TOKEN: '' }, true).GITHUB_TOKEN!, /Polling requires/);
-  assert.ok(validateFields({ ...env, GITHUB_POLL_INTERVAL_MS: '9999' }, true).GITHUB_POLL_INTERVAL_MS);
+  assert.deepEqual(validateFields({ ...env, GITHUB_POLL_INTERVAL_MS: '15000' }, true), {});
+  assert.ok(validateFields({ ...env, GITHUB_POLL_INTERVAL_MS: '10000' }, true).GITHUB_POLL_INTERVAL_MS);
+  assert.ok(validateFields({ ...env, GITHUB_POLL_INTERVAL_MS: '14999' }, true).GITHUB_POLL_INTERVAL_MS);
   assert.ok(validateFields({ ...env, GITHUB_EVENT_SOURCE: 'other' }, true).GITHUB_EVENT_SOURCE);
 });
 
