@@ -1,0 +1,48 @@
+{
+  "name": "github-issue-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A durable GitHub issue worker with a composable just-bash agent",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "build": "npm run build:server && npm run build:ui",
+    "check": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p ui/tsconfig.json",
+    "test": "tsx --test test/*.test.ts",
+    "start": "node --env-file-if-exists=.env dist/cli.js serve",
+    "dev": "node --env-file-if-exists=.env --import tsx src/cli.ts serve",
+    "demo": "tsx src/demo.ts",
+    "build:server": "tsc -p tsconfig.json",
+    "build:ui": "vite build --config ui/vite.config.ts",
+    "ui": "npm run build:ui && node --import tsx -- src/control-cli.ts",
+    "ui:api": "node --import tsx -- src/control-cli.ts",
+    "ui:dev": "vite --config ui/vite.config.ts",
+    "test:ui": "npm run build:ui && playwright test",
+    "demo:recording": "tsx src/demo.ts --record"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "4.0.65",
+    "@ai-sdk/openai-compatible": "3.0.57",
+    "@fontsource/geist": "5.3.0",
+    "@fontsource/geist-mono": "5.3.0",
+    "ai": "7.0.118",
+    "asciinema-player": "3.17.0",
+    "just-bash": "3.4.2",
+    "lucide-react": "1.48.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/node": "26.6.3",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.1",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2",
+    "vite": "8.3.1"
+  }
+}

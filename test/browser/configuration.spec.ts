@@ -1,0 +1,97 @@
+import { test, expect } from '@playwright/test';
+
+test.describe.serial('configuration console', () => {
+  test('saves across tabs, hides secrets after reload, and checks GitHub access', async ({ page }) => {
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.goto('/');
+    await expect(page.getByRole('heading', { name: 'Configuration.' })).toBeVisible();
+    await page.getByRole('button', { name: 'Check configuration' }).click();
+    await expect(page.getByText('Enter a repository', { exact: true })).toBeVisible();
+    await page.getByLabel('Repository', { exact: true }).fill('example/repository');
+    await page.getByLabel('Access token', { exact: true }).check();
+    await page.getByLabel('GitHub token', { exact: true }).fill('browser-test-github-secret');
+    await page.getByLabel('Webhook secret', { exact: true }).fill('browser-test-webhook-secret');
+    await page.getByRole('link', { name: 'Triggers', exact: true }).first().click();
+    await page.getByLabel('Required labels').fill('agent, ready');
+    await page.getByRole('link', { name: 'Model & runtime', exact: true }).click();
+    await page.getByLabel('Provider', { exact: true }).selectOption('openai-compatible');
+    await page.getByLabel('Model ID', { exact: true }).fill('local-test-model');
+    await page.getByLabel('API base URL', { exact: true }).fill('http://127.0.0.1:9999/v1');
+    await page.getByRole('button', { name: 'Check configuration' }).click();
+    await expect(page.getByRole('status')).toContainText('Configuration looks valid');
+    await page.getByRole('button', { name: 'Save changes' }).click();
+    await expect(page.getByRole('status')).toContainText('Configuration saved');
+    await page.reload();
+    await expect(page.getByLabel('Model ID', { exact: true })).toHaveValue('local-test-model');
+    await page.getByRole('link', { name: 'GitHub', exact: true }).click();
+    await expect(page.getByLabel('Repository', { exact: true })).toHaveValue('example/repository');
+    await expect(page.getByLabel('GitHub token', { exact: true })).toHaveValue('');
+    await expect(page.getByLabel('GitHub token', { exact: true })).toHaveAttribute('placeholder', 'Saved — leave blank to keep');
+    await expect(page.getByLabel('Webhook secret', { exact: true })).toHaveValue('');
+    await page.getByRole('button', { name: 'Test connection' }).click();
+    await expect(page.getByRole('status')).toContainText('GitHub repository read access verified');
+    await page.getByRole('button', { name: 'Environment', exact: true }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText('GITHUB_TOKEN=<redacted>');
+    await expect(dialog).not.toContainText('browser-test-github-secret');
+    await expect(dialog).not.toContainText('browser-test-webhook-secret');
+    await page.keyboard.press('Escape');
+    await expect(dialog).not.toBeVisible();
+    await expect(page.getByRole('button', { name: 'Environment', exact: true })).toBeFocused();
+    await page.getByRole('link', { name: 'Triggers', exact: true }).first().click();
+    await expect(page.getByLabel('Required labels')).toHaveValue('agent, ready');
+    expect(errors).toEqual([]);
+  });
+
+  test('keeps draft edits through navigation, resets auth mode on discard, and explicitly removes secrets', async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('radio', { name: 'GitHub App', exact: true }).check();
+    await page.getByLabel('Client ID', { exact: true }).fill('Iv1.draft');
+    await page.getByLabel('Private key path', { exact: true }).fill('/tmp/draft.pem');
+    await page.getByRole('link', { name: 'Tools', exact: true }).click();
+    await page.getByLabel('Extension module').fill('./examples/extensions.mjs');
+    await page.getByRole('link', { name: 'GitHub', exact: true }).click();
+    await expect(page.getByLabel('Client ID', { exact: true })).toHaveValue('Iv1.draft');
+    await page.getByRole('button', { name: 'Discard', exact: true }).click();
+    await page.getByRole('button', { name: 'Discard changes', exact: true }).click();
+    await expect(page.getByLabel('GitHub token', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Remove saved GitHub token' }).click();
+    await expect(page.getByLabel('GitHub token', { exact: true })).toHaveAttribute('placeholder', 'Will be removed when saved');
+    await page.getByRole('button', { name: 'Save changes' }).click();
+    await expect(page.getByRole('status')).toContainText('Configuration saved');
+    await page.reload();
+    await page.getByLabel('Access token', { exact: true }).check();
+    await expect(page.getByLabel('GitHub token', { exact: true })).toHaveAttribute('placeholder', 'Enter a secret');
+  });
+
+  test('a stale tab cannot overwrite a newer save', async ({ page, context }) => {
+    await page.goto('/');
+    await page.getByLabel('Repository', { exact: true }).fill('example/stale');
+    const other = await context.newPage();
+    await other.goto('/');
+    await other.getByLabel('Repository', { exact: true }).fill('example/current');
+    await other.getByRole('button', { name: 'Save changes' }).click();
+    await expect(other.getByRole('status')).toContainText('Configuration saved');
+    await page.getByRole('button', { name: 'Save changes' }).click();
+    await expect(page.getByRole('status')).toContainText('Configuration changed');
+    await page.getByRole('button', { name: 'Reload saved configuration' }).click();
+    await page.getByRole('button', { name: 'Reload from file' }).click();
+    await expect(page.getByLabel('Repository', { exact: true })).toHaveValue('example/current');
+    await other.close();
+  });
+
+  test('mobile navigation and all settings fit the viewport', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/');
+    for (const section of ['GitHub', 'Triggers', 'Model & runtime', 'Tools']) {
+      await page.getByRole('link', { name: section, exact: true }).first().click();
+      await expect(page.getByRole('button', { name: 'Save changes' })).toBeVisible();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    }
+    await page.getByRole('link', { name: 'Setup guide', exact: true }).first().click();
+    await expect(page.getByRole('heading', { name: 'A small setup. A capable agent.' })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  });
+});

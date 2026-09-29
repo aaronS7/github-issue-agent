@@ -1,0 +1,18 @@
+[Unit]
+Description=GitHub issue just-bash agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=issue-agent
+WorkingDirectory=/opt/github-issue-agent
+EnvironmentFile=/etc/github-issue-agent.env
+ExecStart=/usr/bin/node dist/cli.js serve
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

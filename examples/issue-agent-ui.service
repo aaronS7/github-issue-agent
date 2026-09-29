@@ -1,0 +1,20 @@
+# User service: adjust the project path, Node executable and tailnet URL before installing.
+# Install at ~/.config/systemd/user/github-issue-ui.service, then run:
+# systemctl --user daemon-reload
+# systemctl --user enable --now github-issue-ui.service
+[Unit]
+Description=GitHub issue agent configuration UI and API
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/github-issue
+ExecStart=/usr/bin/node -- %h/github-issue/dist/control-cli.js --public-url https://YOUR-NODE.YOUR-TAILNET.ts.net:8443
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target
